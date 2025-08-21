@@ -65,7 +65,7 @@ ADMIN_CREDENTIALS = _admins
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
-SERVICE_ACCOUNT_FILE = "service_account.json"
+SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", "service_account.json")
 
 # Calendar mapping
 CALENDAR_IDS = {
@@ -780,8 +780,24 @@ def main():
 
     application.add_handler(conv)
 
-    print("Bot is running (polling). Press Ctrl+C to stop.")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Configure webhook for Render Web Service
+    render_external_url = os.getenv("RENDER_EXTERNAL_URL")
+    if not render_external_url:
+        raise RuntimeError(
+            "RENDER_EXTERNAL_URL environment variable is required for webhook mode on Render."
+        )
+
+    port = int(os.getenv("PORT", "8000"))
+    webhook_path = os.getenv("WEBHOOK_PATH", BOT_TOKEN)
+    webhook_url = f"{render_external_url.rstrip('/')}/{webhook_path}"
+
+    print(f"Bot is running (webhook) on 0.0.0.0:{port} with path /{webhook_path}")
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=webhook_path,
+        webhook_url=webhook_url,
+    )
 
 if __name__ == "__main__":
     main()
