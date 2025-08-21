@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 
@@ -80,12 +81,46 @@ BOT_TIMEZONE = os.getenv("TIMEZONE", "Asia/Kuching")
 # -----------------------------
 # Google Sheets helpers
 # -----------------------------
+def _load_credentials(scopes: List[str]):
+    """Load Google credentials from env vars or file.
+
+    Priority:
+    1) SERVICE_ACCOUNT_JSON_B64 (base64-encoded JSON)
+    2) SERVICE_ACCOUNT_JSON (raw JSON string)
+    3) SERVICE_ACCOUNT_FILE path (defaults to service_account.json)
+    """
+    b64_json = os.getenv("SERVICE_ACCOUNT_JSON_B64")
+    if b64_json:
+        try:
+            import base64
+            decoded = base64.b64decode(b64_json).decode("utf-8")
+            info = json.loads(decoded)
+            return Credentials.from_service_account_info(info, scopes=scopes)
+        except Exception as e:
+            print("Failed to load credentials from SERVICE_ACCOUNT_JSON_B64:", e)
+
+    raw_json = os.getenv("SERVICE_ACCOUNT_JSON")
+    if raw_json:
+        try:
+            info = json.loads(raw_json)
+            return Credentials.from_service_account_info(info, scopes=scopes)
+        except Exception as e:
+            print("Failed to load credentials from SERVICE_ACCOUNT_JSON:", e)
+
+    # Fallback to file path
+    try:
+        return Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
+    except Exception as e:
+        print("Failed to load credentials from file:", SERVICE_ACCOUNT_FILE, e)
+        raise
+
+
 def _get_ws():
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
-    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
+    creds = _load_credentials(scopes)
     client = gspread.authorize(creds)
     sh = client.open_by_key(SPREADSHEET_ID)
     # ensure tab
@@ -154,7 +189,7 @@ def _get_calendar_service():
     same service account file. Requires Calendar API enabled for the project.
     """
     scopes = ["https://www.googleapis.com/auth/calendar"]
-    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
+    creds = _load_credentials(scopes)
     service = build("calendar", "v3", credentials=creds)
     return service
 
