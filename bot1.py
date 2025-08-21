@@ -787,7 +787,7 @@ def main():
             "RENDER_EXTERNAL_URL environment variable is required for webhook mode on Render."
         )
 
-    port = int(os.getenv("PORT", "8000"))
+    port = int(os.getenv("PORT", "10000"))
     webhook_path = os.getenv("WEBHOOK_PATH", BOT_TOKEN)
     webhook_url = f"{render_external_url.rstrip('/')}/{webhook_path}"
 
