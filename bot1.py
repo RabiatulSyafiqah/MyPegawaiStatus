@@ -80,6 +80,7 @@ CALENDAR_IDS = {
 
 # Timezone for event creation 
 BOT_TIMEZONE = os.getenv("TIMEZONE", "Asia/Kuching")
+DIAG_TOKEN = os.getenv("DIAG_TOKEN")
 
 # -----------------------------
 # Google Sheets helpers
@@ -352,6 +353,31 @@ def role_keyboard() -> ReplyKeyboardMarkup:
 # Flask integration
 _EVENT_LOOP = None  # type: Optional[asyncio.AbstractEventLoop]
 
+def _diagnose_calendar_access() -> List[str]:
+    messages: List[str] = []
+    try:
+        service = _get_calendar_service()
+    except Exception as e:
+        messages.append(f"Calendar service init failed: {e}")
+        return messages
+
+    for officer_code, cal_id in CALENDAR_IDS.items():
+        if not cal_id:
+            messages.append(f"{officer_code}: MISSING_CALENDAR_ID")
+            continue
+        try:
+            meta = service.calendars().get(calendarId=cal_id).execute()
+            messages.append(f"{officer_code}: OK name='{meta.get('summary')}' id='{cal_id}'")
+        except HttpError as e:
+            try:
+                detail = e.content.decode() if hasattr(e, "content") and isinstance(e.content, (bytes, bytearray)) else str(e)
+            except Exception:
+                detail = str(e)
+            messages.append(f"{officer_code}: ERROR id='{cal_id}' detail={detail}")
+        except Exception as e:
+            messages.append(f"{officer_code}: ERROR id='{cal_id}' detail={e}")
+    return messages
+
 def create_flask_app(app_telegram: Application) -> Flask:
     flask_app = Flask(__name__)
 
@@ -378,6 +404,36 @@ def create_flask_app(app_telegram: Application) -> Flask:
         assert _EVENT_LOOP is not None
         asyncio.run_coroutine_threadsafe(app_telegram.process_update(update), _EVENT_LOOP)
         return Response(status=200)
+
+    @flask_app.route("/diag/calendar", methods=["GET"])  # read-only diagnostics
+    def diag_calendar():
+        if not DIAG_TOKEN or request.args.get("token") != DIAG_TOKEN:
+            return Response("forbidden", status=403)
+        msgs = _diagnose_calendar_access()
+        for m in msgs:
+            print("DIAG:", m)
+        return "\n".join(msgs), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+    @flask_app.route("/diag/create_test_event", methods=["POST"])  # write test
+    def diag_create_test_event():
+        if not DIAG_TOKEN or request.args.get("token") != DIAG_TOKEN:
+            return Response("forbidden", status=403)
+        officer = request.args.get("officer", "")
+        if officer not in CALENDAR_IDS:
+            return Response("unknown officer", status=400)
+        # create a short meeting 15 minutes from now
+        now = datetime.now(ZoneInfo(BOT_TIMEZONE))
+        start = now + timedelta(minutes=15)
+        end = start + timedelta(minutes=30)
+        date_str = start.strftime(DATE_FMT)
+        ok = create_calendar_event_for_meeting(
+            date_str=date_str,
+            start_time=start.strftime(TIME_FMT),
+            end_time=end.strftime(TIME_FMT),
+            officer_code=officer,
+            details="Diagnostic test event"
+        )
+        return ("created" if ok else "failed"), (200 if ok else 500)
 
     # Log available routes for debugging in Render logs
     print("Flask routes:", flask_app.url_map)
