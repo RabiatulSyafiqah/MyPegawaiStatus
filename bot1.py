@@ -32,6 +32,14 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from zoneinfo import ZoneInfo
 
+# NEW: Flask for webhook server
+from flask import Flask, request, jsonify
+
+# Flask app and globals used by routes
+flask_app = Flask(__name__)
+telegram_application: Optional[Application] = None
+_bot_event_loop: Optional[asyncio.AbstractEventLoop] = None
+
 # -----------------------------
 # Configuration
 # -----------------------------
@@ -777,7 +785,43 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
+# -----------------------------
+# Flask routes for Telegram webhook
+# -----------------------------
+@flask_app.get("/")
+def healthcheck():
+    return jsonify({"status": "ok"})
+
+
+@flask_app.post("/<path:webhook_path>")
+def telegram_webhook(webhook_path: str):
+    global telegram_application, _bot_event_loop
+    if telegram_application is None or _bot_event_loop is None:
+        return ("Application not initialized", 503)
+
+    try:
+        data = request.get_json(force=True, silent=False)
+    except Exception:
+        return ("Invalid JSON", 400)
+
+    if not data:
+        return ("Empty body", 400)
+
+    try:
+        update = Update.de_json(data, telegram_application.bot)
+        asyncio.run_coroutine_threadsafe(
+            telegram_application.process_update(update),
+            _bot_event_loop,
+        )
+    except Exception as e:
+        print("Failed to process update:", e)
+        return ("Error", 500)
+
+    return ("OK", 200)
+
+
 def main():
+    global telegram_application, _bot_event_loop
     if not BOT_TOKEN or not SPREADSHEET_ID:
         raise RuntimeError("Please set BOT_TOKEN and SPREADSHEET_ID environment variables.")
 
@@ -815,7 +859,7 @@ def main():
 
     application.add_handler(conv)
 
-    # Configure webhook for Render Web Service
+    # Configure webhook for Render Web Service via Flask
     render_external_url = os.getenv("RENDER_EXTERNAL_URL")
     if not render_external_url:
         raise RuntimeError(
@@ -826,13 +870,33 @@ def main():
     webhook_path = os.getenv("WEBHOOK_PATH", BOT_TOKEN)
     webhook_url = f"{render_external_url.rstrip('/')}/{webhook_path}"
 
-    print(f"Bot is running (webhook) on 0.0.0.0:{port} with path /{webhook_path}")
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=webhook_path,
-        webhook_url=webhook_url,
-    )
+    # Start PTB Application in a background asyncio event loop
+    _bot_event_loop = asyncio.new_event_loop()
+
+    async def _start_bot():
+        await application.initialize()
+        # Set Telegram webhook to point to Flask endpoint
+        try:
+            await application.bot.set_webhook(url=webhook_url)
+            print("Webhook set:", webhook_url)
+        except Exception as e:
+            print("Failed to set webhook:", e)
+        await application.start()
+
+    def _run_loop(loop: asyncio.AbstractEventLoop):
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_start_bot())
+        loop.run_forever()
+
+    import threading
+    t = threading.Thread(target=_run_loop, args=(_bot_event_loop,), daemon=True)
+    t.start()
+
+    telegram_application = application
+
+    print(f"Bot is running (Flask webhook) on 0.0.0.0:{port} with path /{webhook_path}")
+    flask_app.run(host="0.0.0.0", port=port)
+
 
 if __name__ == "__main__":
     main()
