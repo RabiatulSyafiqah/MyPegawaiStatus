@@ -348,6 +348,10 @@ def create_flask_app(app_telegram: Application) -> Flask:
     def healthcheck():
         return ("ok", 200)
 
+    @flask_app.route("/", methods=["GET"])  # simple root page
+    def index():
+        return "Service is live", 200
+
     webhook_path = os.getenv("WEBHOOK_PATH", BOT_TOKEN)
     if not webhook_path:
         raise RuntimeError("WEBHOOK_PATH or BOT_TOKEN must be set to define webhook route")
