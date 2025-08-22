@@ -31,6 +31,10 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from zoneinfo import ZoneInfo
 
+# Flask integration
+from flask import Flask, request, Response
+import threading
+
 # -----------------------------
 # Configuration
 # -----------------------------
@@ -333,6 +337,34 @@ def role_keyboard() -> ReplyKeyboardMarkup:
         one_time_keyboard=True,
         resize_keyboard=True,
     )
+
+# Flask integration
+_EVENT_LOOP = None  # type: Optional[asyncio.AbstractEventLoop]
+
+def create_flask_app(app_telegram: Application) -> Flask:
+    flask_app = Flask(__name__)
+
+    @flask_app.route("/health", methods=["GET"])  # simple uptime/health check
+    def healthcheck():
+        return ("ok", 200)
+
+    webhook_path = os.getenv("WEBHOOK_PATH", BOT_TOKEN)
+    if not webhook_path:
+        raise RuntimeError("WEBHOOK_PATH or BOT_TOKEN must be set to define webhook route")
+    route = f"/{webhook_path}"
+
+    @flask_app.route(route, methods=["POST"])
+    def telegram_webhook():
+        data = request.get_json(force=True, silent=True)
+        if not data:
+            return Response(status=400)
+        update = Update.de_json(data, app_telegram.bot)
+        # schedule processing on the background event loop
+        assert _EVENT_LOOP is not None
+        asyncio.run_coroutine_threadsafe(app_telegram.process_update(update), _EVENT_LOOP)
+        return Response(status=200)
+
+    return flask_app
 
 # -----------------------------
 # Conversation states
@@ -780,7 +812,7 @@ def main():
 
     application.add_handler(conv)
 
-    # Configure webhook for Render Web Service
+    # Configure webhook for Flask + Render Web Service
     render_external_url = os.getenv("RENDER_EXTERNAL_URL")
     if not render_external_url:
         raise RuntimeError(
@@ -791,13 +823,20 @@ def main():
     webhook_path = os.getenv("WEBHOOK_PATH", BOT_TOKEN)
     webhook_url = f"{render_external_url.rstrip('/')}/{webhook_path}"
 
-    print(f"Bot is running (webhook) on 0.0.0.0:{port} with path /{webhook_path}")
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=webhook_path,
-        webhook_url=webhook_url,
-    )
+    # Start Application on a dedicated asyncio loop in the background
+    global _EVENT_LOOP
+    _EVENT_LOOP = asyncio.new_event_loop()
+    threading.Thread(target=_EVENT_LOOP.run_forever, daemon=True).start()
+
+    # initialize/start application and set webhook
+    asyncio.run_coroutine_threadsafe(application.initialize(), _EVENT_LOOP).result()
+    asyncio.run_coroutine_threadsafe(application.start(), _EVENT_LOOP).result()
+    asyncio.run_coroutine_threadsafe(application.bot.set_webhook(webhook_url), _EVENT_LOOP).result()
+
+    flask_app = create_flask_app(application)
+
+    print(f"Bot is running (Flask) on 0.0.0.0:{port} with path /{webhook_path}")
+    flask_app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
     main()
