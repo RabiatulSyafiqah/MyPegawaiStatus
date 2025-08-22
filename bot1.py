@@ -362,8 +362,8 @@ def create_flask_app(app_telegram: Application) -> Flask:
         assert _EVENT_LOOP is not None
         asyncio.run_coroutine_threadsafe(app_telegram.process_update(update), _EVENT_LOOP)
         return Response(status=200)
-        
- return flask_app
+
+    return flask_app
 
 # -----------------------------
 # Conversation states
