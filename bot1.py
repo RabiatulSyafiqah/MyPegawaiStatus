@@ -607,6 +607,18 @@ async def admin_meeting_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Status berjaya dikemaskini dan acara telah ditambah ke Google Calendar.",
                                        reply_markup=ReplyKeyboardRemove())
     else:
+        # Debug info to logs
+        try:
+            cal_id_dbg = _get_calendar_id_for_officer(context.user_data["officer"])  # type: ignore
+            print("Calendar insert failed (meeting)", {
+                "officer": context.user_data["officer"],
+                "calendar_id": cal_id_dbg,
+                "date": context.user_data.get("date"),
+                "start": context.user_data.get("start_time"),
+                "end": context.user_data.get("end_time"),
+            })
+        except Exception:
+            pass
         await update.message.reply_text("Status berjaya dikemaskini. (Gagal menambah acara ke Calendar — semak konfigurasi.)",
                                        reply_markup=ReplyKeyboardRemove())
 
@@ -639,6 +651,17 @@ async def admin_official_details(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("Status berjaya dikemaskini dan urusan rasmi telah ditambah ke Google Calendar.",
                                        reply_markup=ReplyKeyboardRemove())
     else:
+        # Debug info to logs
+        try:
+            cal_id_dbg = _get_calendar_id_for_officer(context.user_data["officer"])  # type: ignore
+            print("Calendar insert failed (official)", {
+                "officer": context.user_data["officer"],
+                "calendar_id": cal_id_dbg,
+                "date": context.user_data.get("date"),
+                "details": context.user_data.get("official_details"),
+            })
+        except Exception:
+            pass
         await update.message.reply_text("Status berjaya dikemaskini. (Gagal menambah ke Calendar — semak konfigurasi.)",
                                        reply_markup=ReplyKeyboardRemove())
 
