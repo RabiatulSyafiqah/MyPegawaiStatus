@@ -414,7 +414,7 @@ def create_flask_app(app_telegram: Application) -> Flask:
             print("DIAG:", m)
         return "\n".join(msgs), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
-    @flask_app.route("/diag/create_test_event", methods=["POST"])  # write test
+    @flask_app.route("/diag/create_test_event", methods=["GET", "POST"])  # write test
     def diag_create_test_event():
         if not DIAG_TOKEN or request.args.get("token") != DIAG_TOKEN:
             return Response("forbidden", status=403)
