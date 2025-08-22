@@ -348,7 +348,7 @@ def create_flask_app(app_telegram: Application) -> Flask:
     def healthcheck():
         return ("ok", 200)
 
-    @flask_app.route("/", methods=["GET"])  # simple root page
+    @flask_app.route("/", methods=["GET", "HEAD"])  # simple root page
     def index():
         return "Service is live", 200
 
@@ -367,6 +367,9 @@ def create_flask_app(app_telegram: Application) -> Flask:
         assert _EVENT_LOOP is not None
         asyncio.run_coroutine_threadsafe(app_telegram.process_update(update), _EVENT_LOOP)
         return Response(status=200)
+
+    # Log available routes for debugging in Render logs
+    print("Flask routes:", flask_app.url_map)
 
     return flask_app
 
