@@ -209,7 +209,13 @@ def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: 
         print("Created meeting event:", created.get("id"))
         return True
     except HttpError as e:
-        print("Google Calendar API error (meeting):", e)
+        # Improved error detail
+        status = getattr(e, "status_code", "n/a")
+        try:
+            detail = e.content.decode() if hasattr(e, "content") and isinstance(e.content, (bytes, bytearray)) else str(e)
+        except Exception:
+            detail = str(e)
+        print(f"Google Calendar API error (meeting): status={status} id={cal_id} detail={detail}")
         return False
     except Exception as e:
         print("Error creating meeting event:", e)
@@ -241,7 +247,12 @@ def create_calendar_event_for_official(date_str: str, officer_code: str, details
         print("Created official event:", created.get("id"))
         return True
     except HttpError as e:
-        print("Google Calendar API error (official):", e)
+        status = getattr(e, "status_code", "n/a")
+        try:
+            detail = e.content.decode() if hasattr(e, "content") and isinstance(e.content, (bytes, bytearray)) else str(e)
+        except Exception:
+            detail = str(e)
+        print(f"Google Calendar API error (official): status={status} id={cal_id} detail={detail}")
         return False
     except Exception as e:
         print("Error creating official event:", e)
@@ -839,6 +850,14 @@ def main():
     asyncio.run_coroutine_threadsafe(application.initialize(), _EVENT_LOOP).result()
     asyncio.run_coroutine_threadsafe(application.start(), _EVENT_LOOP).result()
     asyncio.run_coroutine_threadsafe(application.bot.set_webhook(webhook_url), _EVENT_LOOP).result()
+
+    # Log service account and calendar IDs for troubleshooting
+    try:
+        sa_email = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE).service_account_email
+        print("Service account email:", sa_email)
+    except Exception as e:
+        print("Could not read service account email:", e)
+    print("Calendar IDs:", CALENDAR_IDS)
 
     flask_app = create_flask_app(application)
 
