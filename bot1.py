@@ -71,7 +71,13 @@ SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", "service_account.json")
 
 # Calendar mapping
-CALENDAR_IDS = {
+try:
+    from sheet import CALENDAR_IDS as _CALENDAR_IDS_OVERRIDE  # type: ignore
+except Exception:
+    _CALENDAR_IDS_OVERRIDE = None
+
+CALENDAR_IDS = _CALENDAR_IDS_OVERRIDE or {
+    
     "DO": os.getenv("CAL_DO", ""),
     "ADO_PENTADBIRAN": os.getenv("CAL_ADO_PENTADBIRAN", ""),
     "ADO_PEMBANGUNAN": os.getenv("CAL_ADO_PEMBANGUNAN", ""),
