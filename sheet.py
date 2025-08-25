@@ -1,6 +1,6 @@
 CALENDAR_IDS = {
    
-    "DO": "do.user@gmail.com",
+    "DO": "rabiatulsyafiqahhh@gmail.com",
     "ADO_PENTADBIRAN": "rabiatulsyafiqahhh@gmail.com",
-    "ADO_PEMBANGUNAN": "syafiqahzamlee@gmail.com",
+    "ADO_PEMBANGUNAN": "rabiatulsyafiqahhh@gmail.com"
 }
