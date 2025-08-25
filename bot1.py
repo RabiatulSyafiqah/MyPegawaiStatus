@@ -1,6 +1,8 @@
 import asyncio
 import os
 import re
+import threading
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 
@@ -33,6 +35,54 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, request, Response
 import threading
+
+# -----------------------------
+# Minimal HTTP health server (for Render/Web hosts expecting a bound port)
+# -----------------------------
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802 (method name from BaseHTTPRequestHandler)
+        if self.path in ("/", "/health", "/healthz", "/ping"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"OK")
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    # Silence default noisy logging
+    def log_message(self, format, *args):  # noqa: A003 (shadow builtins via lib signature)
+        return
+
+def start_health_server_if_needed():
+    """
+    Start a tiny HTTP server in a background thread, binding to $PORT if set.
+    This is helpful on platforms like Render where Web Services must bind to a port.
+    Safe to call multiple times; only starts once per process.
+    """
+    port_str = os.getenv("PORT")
+    if not port_str:
+        return  # Not running on a platform that requires binding to $PORT
+
+    try:
+        port = int(port_str)
+    except ValueError:
+        port = 10000
+
+    # Use a module-level attribute to avoid starting multiple times
+    if getattr(start_health_server_if_needed, "_started", False):
+        return
+
+    def _serve():
+        server = ThreadingHTTPServer(("0.0.0.0", port), _HealthHandler)
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()
+
+    thread = threading.Thread(target=_serve, name="health-server", daemon=True)
+    thread.start()
+    start_health_server_if_needed._started = True  # type: ignore[attr-defined]
 
 # -----------------------------
 # Configuration
@@ -789,6 +839,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     if not BOT_TOKEN or not SPREADSHEET_ID:
         raise RuntimeError("Please set BOT_TOKEN and SPREADSHEET_ID environment variables.")
+
+    # Start background health server for platforms that require a bound port
+    start_health_server_if_needed()
 
     application: Application = ApplicationBuilder().token(BOT_TOKEN).build()
 
