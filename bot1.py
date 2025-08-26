@@ -282,6 +282,37 @@ def create_calendar_event_for_official(date_str: str, officer_code: str, details
         print("Error creating official event:", e)
         return False
 
+def create_calendar_event_for_absence(date_str: str, officer_code: str, reason: str = "") -> bool:
+    """
+    Create an all-day Calendar event marking the officer as TIDAK HADIR.
+    """
+    cal_id = _get_calendar_id_for_officer(officer_code)
+    if not cal_id:
+        print(f"No calendar configured for officer {officer_code} (absence)")
+        return False
+
+    try:
+        d = datetime.strptime(date_str, DATE_FMT).date()
+        event = {
+            "summary": f"Tidak Hadir — {_code_to_label(officer_code)}",
+            "description": (reason or "").strip(),
+            # All-day event: end.date is exclusive
+            "start": {"date": d.isoformat()},
+            "end": {"date": (d + timedelta(days=1)).isoformat()},
+            "reminders": {"useDefault": True},
+        }
+
+        service = _get_calendar_service()
+        created = service.events().insert(calendarId=cal_id, body=event).execute()
+        print("Created absence event:", created.get("id"))
+        return True
+    except HttpError as e:
+        print("Google Calendar API error (absence):", e)
+        return False
+    except Exception as e:
+        print("Error creating absence event:", e)
+        return False
+
 # -----------------------------
 # Utilities
 # -----------------------------
@@ -541,7 +572,7 @@ async def _prompt_admin_continue(update: Update):
 
 async def admin_absence_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["reason"] = update.message.text.strip()
-    # Save immediately (no meeting info)
+    # Save to Sheets
     save_status(
         date_str=context.user_data["date"],
         officer_code=context.user_data["officer"],
@@ -553,6 +584,25 @@ async def admin_absence_reason(update: Update, context: ContextTypes.DEFAULT_TYP
         official_details="",
         updated_by=context.user_data.get("username", "admin"),
     )
+
+    # NEW: Add all-day "Tidak Hadir" event to Calendar
+    cal_ok = create_calendar_event_for_absence(
+        date_str=context.user_data["date"],
+        officer_code=context.user_data["officer"],
+        reason=context.user_data.get("reason", "")
+    )
+
+    if cal_ok:
+        await update.message.reply_text(
+            "Status berjaya dikemaskini dan ketidakhadiran telah ditambah ke Google Calendar.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+    else:
+        await update.message.reply_text(
+            "Status berjaya dikemaskini. (Gagal menambah ketidakhadiran ke Calendar — semak konfigurasi.)",
+            reply_markup=ReplyKeyboardRemove()
+        )
+
     await _prompt_admin_continue(update)
     return ADMIN_CONTINUE_DECISION
 
