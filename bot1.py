@@ -163,7 +163,11 @@ def _get_calendar_service():
     Build and return an authorized Google Calendar service using the
     same service account file. Requires Calendar API enabled for the project.
     """
-    scopes = ["https://www.googleapis.com/auth/calendar"]
+    scopes = [
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/calendar.events"
+    ]
+    
     creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
     service = build("calendar", "v3", credentials=creds)
     return service
