@@ -182,30 +182,50 @@ def _code_to_label(code: str) -> str:
     return code
 
 def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: str, officer_code: str, details: str = "") -> bool:
-    """
-    Create a timed event on officer's calendar for a meeting.
-    Returns True on success, False on failure.
-    """
+    import sys
+    
+    # Force flush output to ensure Render shows it
+    def log_msg(msg):
+        print(f"CALENDAR_DEBUG: {msg}")
+        sys.stdout.flush()
+        
+    log_msg(f"Starting event creation for {officer_code} on {date_str}")
+    
     cal_id = _get_calendar_id_for_officer(officer_code)
     if not cal_id:
-        print(f"No calendar configured for officer {officer_code}")
+        log_msg(f"ERROR: No calendar ID for {officer_code}")
         return False
-
+        
+    log_msg(f"Using calendar ID: {cal_id}")
+    
     try:
-        tz = ZoneInfo(BOT_TIMEZONE)
-    except Exception as e:
-        print("ZoneInfo error, falling back to naive datetimes:", e)
-        tz = None
+        # Test service creation first
+        log_msg("Creating calendar service...")
+        service = _get_calendar_service()
+        log_msg("Service created successfully")
+        
+        # Parse timezone
+        log_msg("Setting up timezone...")
+        try:
+            tz = ZoneInfo(BOT_TIMEZONE)
+            log_msg(f"Timezone set to: {BOT_TIMEZONE}")
+        except Exception as e:
+            log_msg(f"ZoneInfo error, falling back to naive datetimes: {e}")
+            tz = None
 
-    try:
-        # parse date and times
+        # Parse datetime
+        log_msg("Parsing datetime...")
         dt_start = datetime.strptime(f"{date_str} {start_time}", f"{DATE_FMT} {TIME_FMT}")
         dt_end = datetime.strptime(f"{date_str} {end_time}", f"{DATE_FMT} {TIME_FMT}")
+        log_msg(f"Parsed start: {dt_start}, end: {dt_end}")
 
         if tz:
             dt_start = dt_start.replace(tzinfo=tz)
             dt_end = dt_end.replace(tzinfo=tz)
+            log_msg("Applied timezone to datetime objects")
 
+        # Create event object
+        log_msg("Creating event object...")
         event = {
             "summary": f"Mesyuarat — {_code_to_label(officer_code)}",
             "description": details or "",
@@ -213,16 +233,21 @@ def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: 
             "end": {"dateTime": dt_end.isoformat(), "timeZone": BOT_TIMEZONE},
             "reminders": {"useDefault": True},
         }
-
-        service = _get_calendar_service()
+        log_msg(f"Event object created: {json.dumps(event, indent=2)}")
+        
+        log_msg("Making API call...")
         created = service.events().insert(calendarId=cal_id, body=event).execute()
-        print("Created meeting event:", created.get("id"))
+        log_msg(f"SUCCESS: Event created with ID: {created.get('id')}")
         return True
+        
     except HttpError as e:
-        print("Google Calendar API error (meeting):", e)
+        log_msg(f"Google Calendar API HTTP error: {e}")
+        log_msg(f"HTTP error details: status={e.resp.status}, reason={e.resp.reason}")
         return False
     except Exception as e:
-        print("Error creating meeting event:", e)
+        log_msg(f"EXCEPTION: {type(e).__name__}: {str(e)}")
+        import traceback
+        log_msg(f"TRACEBACK: {traceback.format_exc()}")
         return False
 
 def create_calendar_event_for_official(date_str: str, officer_code: str, details: str = "") -> bool:
