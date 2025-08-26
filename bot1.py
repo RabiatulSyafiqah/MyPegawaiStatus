@@ -1,7 +1,7 @@
 import asyncio
 import os
 import re
-import uuid
+import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 
@@ -31,6 +31,9 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from zoneinfo import ZoneInfo
+
+from flask import Flask, request, Response
+import threading
 
 # -----------------------------
 # Configuration
@@ -66,13 +69,19 @@ ADMIN_CREDENTIALS = _admins
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
-SERVICE_ACCOUNT_FILE = "service_account.json"
+SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", "service_account.json")
 
 # Calendar mapping
-CALENDAR_IDS = {
-    "DO": os.getenv("CAL_DO", ""),
-    "ADO_PENTADBIRAN": os.getenv("CAL_ADO_PENTADBIRAN", ""),
-    "ADO_PEMBANGUNAN": os.getenv("CAL_ADO_PEMBANGUNAN", ""),
+try:
+    from sheet import CALENDAR_IDS as _CALENDAR_IDS_OVERRIDE  # type: ignore
+except Exception:
+    _CALENDAR_IDS_OVERRIDE = None
+
+CALENDAR_IDS = _CALENDAR_IDS_OVERRIDE or {
+    
+    "DO": os.getenv("CAL_DO", "rabiatulsyafiqahhh@gmail.com"),
+    "ADO_PENTADBIRAN": os.getenv("CAL_ADO_PENTADBIRAN", "rabiatulsyafiqahhh@gmail.com"),
+    "ADO_PEMBANGUNAN": os.getenv("CAL_ADO_PEMBANGUNAN", "rabiatulsyafiqahhh@gmail.com"),
 }
 
 # Timezone for event creation 
@@ -147,12 +156,15 @@ def query_status(date_str: str, officer_code: str) -> List[Dict[str, str]]:
     return results
 
 # -----------------------------
-# Google Calendar helpers (with forced unique IDs)
+# Google Calendar helpers
 # -----------------------------
 def _get_calendar_service():
+    """
+    Build and return an authorized Google Calendar service using the
+    same service account file. Requires Calendar API enabled for the project.
+    """
     scopes = ["https://www.googleapis.com/auth/calendar"]
     creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
-    print("[DEBUG] Using service account:", creds.service_account_email)
     service = build("calendar", "v3", credentials=creds)
     return service
 
@@ -166,20 +178,26 @@ def _code_to_label(code: str) -> str:
     return code
 
 def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: str, officer_code: str, details: str = "") -> bool:
+    """
+    Create a timed event on officer's calendar for a meeting.
+    Returns True on success, False on failure.
+    """
     cal_id = _get_calendar_id_for_officer(officer_code)
     if not cal_id:
-        print(f"[DEBUG] No calendar configured for officer {officer_code}")
+        print(f"No calendar configured for officer {officer_code}")
         return False
 
     try:
         tz = ZoneInfo(BOT_TIMEZONE)
     except Exception as e:
-        print("[DEBUG] ZoneInfo error, using naive datetimes:", e)
+        print("ZoneInfo error, falling back to naive datetimes:", e)
         tz = None
 
     try:
+        # parse date and times
         dt_start = datetime.strptime(f"{date_str} {start_time}", f"{DATE_FMT} {TIME_FMT}")
         dt_end = datetime.strptime(f"{date_str} {end_time}", f"{DATE_FMT} {TIME_FMT}")
+
         if tz:
             dt_start = dt_start.replace(tzinfo=tz)
             dt_end = dt_end.replace(tzinfo=tz)
@@ -190,56 +208,49 @@ def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: 
             "start": {"dateTime": dt_start.isoformat(), "timeZone": BOT_TIMEZONE},
             "end": {"dateTime": dt_end.isoformat(), "timeZone": BOT_TIMEZONE},
             "reminders": {"useDefault": True},
-            # Force uniqueness to avoid silent skips
-            "id": str(uuid.uuid4()).replace("-", "")[:20]
         }
-
-        print(f"[DEBUG] Inserting meeting event into calendar '{cal_id}'")
-        print("[DEBUG] Event payload:", event)
 
         service = _get_calendar_service()
         created = service.events().insert(calendarId=cal_id, body=event).execute()
-
-        print("[DEBUG] Created meeting event:", created.get("htmlLink"))
+        print("Created meeting event:", created.get("id"))
         return True
     except HttpError as e:
-        print("[ERROR] Google Calendar API error (meeting):", e)
+        print("Google Calendar API error (meeting):", e)
         return False
     except Exception as e:
-        print("[ERROR] Unexpected error creating meeting event:", e)
+        print("Error creating meeting event:", e)
         return False
 
 def create_calendar_event_for_official(date_str: str, officer_code: str, details: str = "") -> bool:
+    """
+    Create an all-day event on officer's calendar for URUSAN RASMI.
+    Returns True on success, False on failure.
+    """
     cal_id = _get_calendar_id_for_officer(officer_code)
     if not cal_id:
-        print(f"[DEBUG] No calendar configured for officer {officer_code}")
+        print(f"No calendar configured for officer {officer_code}")
         return False
 
     try:
         d = datetime.strptime(date_str, DATE_FMT).date()
+        # Google Calendar all-day event uses 'date' and end date is exclusive
         event = {
             "summary": f"Urusan Rasmi — {_code_to_label(officer_code)}",
             "description": details or "",
             "start": {"date": d.isoformat()},
             "end": {"date": (d + timedelta(days=1)).isoformat()},
             "reminders": {"useDefault": True},
-            # Force uniqueness
-            "id": str(uuid.uuid4()).replace("-", "")[:20]
         }
-
-        print(f"[DEBUG] Inserting official event into calendar '{cal_id}'")
-        print("[DEBUG] Event payload:", event)
 
         service = _get_calendar_service()
         created = service.events().insert(calendarId=cal_id, body=event).execute()
-
-        print("[DEBUG] Created official event:", created.get("htmlLink"))
+        print("Created official event:", created.get("id"))
         return True
     except HttpError as e:
-        print("[ERROR] Google Calendar API error (official):", e)
+        print("Google Calendar API error (official):", e)
         return False
     except Exception as e:
-        print("[ERROR] Unexpected error creating official event:", e)
+        print("Error creating official event:", e)
         return False
 
 # -----------------------------
@@ -333,6 +344,41 @@ def role_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True,
     )
 
+# Flask integration
+_EVENT_LOOP = None  # type: Optional[asyncio.AbstractEventLoop]
+
+def create_flask_app(app_telegram: Application) -> Flask:
+    flask_app = Flask(__name__)
+
+    @flask_app.route("/health", methods=["GET"])  # simple uptime/health check
+    def healthcheck():
+        return ("ok", 200)
+
+    @flask_app.route("/", methods=["GET", "HEAD"])  # simple root page
+    def index():
+        return "Service is live", 200
+
+    webhook_path = os.getenv("WEBHOOK_PATH", BOT_TOKEN)
+    if not webhook_path:
+        raise RuntimeError("WEBHOOK_PATH or BOT_TOKEN must be set to define webhook route")
+    route = f"/{webhook_path}"
+
+    @flask_app.route(route, methods=["POST"])
+    def telegram_webhook():
+        data = request.get_json(force=True, silent=True)
+        if not data:
+            return Response(status=400)
+        update = Update.de_json(data, app_telegram.bot)
+        # schedule processing on the background event loop
+        assert _EVENT_LOOP is not None
+        asyncio.run_coroutine_threadsafe(app_telegram.process_update(update), _EVENT_LOOP)
+        return Response(status=200)
+
+    # Log available routes for debugging in Render logs
+    print("Flask routes:", flask_app.url_map)
+
+    return flask_app
+    
 # -----------------------------
 # Conversation states
 # -----------------------------
@@ -779,8 +825,31 @@ def main():
 
     application.add_handler(conv)
 
-    print("Bot is running (polling). Press Ctrl+C to stop.")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Configure webhook for Render Web Service
+    render_external_url = os.getenv("RENDER_EXTERNAL_URL")
+    if not render_external_url:
+        raise RuntimeError(
+            "RENDER_EXTERNAL_URL environment variable is required for webhook mode on Render."
+        )
+
+    port = int(os.getenv("PORT", "10000"))
+    webhook_path = os.getenv("WEBHOOK_PATH", BOT_TOKEN)
+    webhook_url = f"{render_external_url.rstrip('/')}/{webhook_path}"
+
+    # Start Application on a dedicated asyncio loop in the background
+    global _EVENT_LOOP
+    _EVENT_LOOP = asyncio.new_event_loop()
+    threading.Thread(target=_EVENT_LOOP.run_forever, daemon=True).start()
+
+    # initialize/start application and set webhook
+    asyncio.run_coroutine_threadsafe(application.initialize(), _EVENT_LOOP).result()
+    asyncio.run_coroutine_threadsafe(application.start(), _EVENT_LOOP).result()
+    asyncio.run_coroutine_threadsafe(application.bot.set_webhook(webhook_url), _EVENT_LOOP).result()
+
+    flask_app = create_flask_app(application)
+
+    print(f"Bot is running (Flask) on 0.0.0.0:{port} with path /{webhook_path}")
+    flask_app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
     main()
