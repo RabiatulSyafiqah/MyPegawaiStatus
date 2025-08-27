@@ -80,8 +80,8 @@ except Exception:
 CALENDAR_IDS = _CALENDAR_IDS_OVERRIDE or {
     
     "DO": os.getenv("CAL_DO"),
-    "ADO_PENTADBIRAN": os.getenv("CAL_ADO_PENTADBIRAN", "rabiatulsyafiqahhh@gmail.com"),
-    "ADO_PEMBANGUNAN": os.getenv("CAL_ADO_PEMBANGUNAN", "rabiatulsyafiqahhh@gmail.com"),
+    "ADO_PENTADBIRAN": os.getenv("CAL_ADO_PENTADBIRAN"),
+    "ADO_PEMBANGUNAN": os.getenv("CAL_ADO_PEMBANGUNAN"),
 }
 
 # Timezone for event creation 
