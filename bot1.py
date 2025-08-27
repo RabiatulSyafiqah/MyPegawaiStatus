@@ -558,7 +558,7 @@ async def admin_attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         # Ask if mesyuarat, urusan rasmi, or Tiada
         await update.message.reply_text(
-            "Sila nyatakan sekiranya pegawai yang dikemas kini mempunyai mesyuarat, urusan rasmi, atau tiada urusan:",
+            "Sila nyatakan sekiranya pegawai yang dikemas kini mempunyai mesyuarat, urusan rasmi, atau tiada sebarang urusan:",
             reply_markup=two_choice_keyboard(),
         )
         return ADMIN_HAS_MEETING_OR_OFFICIAL
@@ -614,7 +614,7 @@ async def admin_has_meeting_or_official(update: Update, context: ContextTypes.DE
         return ADMIN_MEETING_START
     elif text == "Urusan rasmi":
         context.user_data["meeting_type"] = "URUSAN"
-        await update.message.reply_text("Nyatakan butiran urusan rasmi tersebut:", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("Nyatakan butiran urusan (Sila nyatakan tempoh masa urusan):", reply_markup=ReplyKeyboardRemove())
         return ADMIN_OFFICIAL_DETAILS
     elif text == "Tiada":
         # hadir tetapi tiada mesyuarat / urusan rasmi 
