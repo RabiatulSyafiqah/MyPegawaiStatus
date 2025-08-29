@@ -594,7 +594,7 @@ async def admin_absence_reason(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if cal_ok:
         await update.message.reply_text(
-            "Status berjaya dikemaskini dan ketidakhadiran telah ditambah ke Google Calendar.",
+            "Status berjaya dikemaskini ke Google Calendar.",
             reply_markup=ReplyKeyboardRemove()
         )
     else:
@@ -614,7 +614,7 @@ async def admin_has_meeting_or_official(update: Update, context: ContextTypes.DE
         return ADMIN_MEETING_START
     elif text == "Urusan rasmi":
         context.user_data["meeting_type"] = "URUSAN"
-        await update.message.reply_text("Nyatakan butiran urusan (Sila nyatakan tempoh masa urusan):", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("Nyatakan tempoh masa dan butiran urusan:", reply_markup=ReplyKeyboardRemove())
         return ADMIN_OFFICIAL_DETAILS
     elif text == "Tiada":
         # hadir tetapi tiada mesyuarat / urusan rasmi 
@@ -678,7 +678,7 @@ async def admin_meeting_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if cal_ok:
-        await update.message.reply_text("Status berjaya dikemaskini dan acara telah ditambah ke Google Calendar.",
+        await update.message.reply_text("Status berjaya dikemaskini ke Google Calendar.",
                                        reply_markup=ReplyKeyboardRemove())
     else:
         await update.message.reply_text("Status berjaya dikemaskini. (Gagal menambah acara ke Calendar — semak konfigurasi.)",
@@ -710,7 +710,7 @@ async def admin_official_details(update: Update, context: ContextTypes.DEFAULT_T
     )
 
     if cal_ok:
-        await update.message.reply_text("Status berjaya dikemaskini dan urusan rasmi telah ditambah ke Google Calendar.",
+        await update.message.reply_text("Status berjaya dikemaskini ke Google Calendar.",
                                        reply_markup=ReplyKeyboardRemove())
     else:
         await update.message.reply_text("Status berjaya dikemaskini. (Gagal menambah ke Calendar — semak konfigurasi.)",
@@ -812,7 +812,7 @@ async def staff_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for r in records:
             if r.get("hadir") == "TIDAK":
                 reason = r.get("reason", "(tiada sebab)")
-                lines.append(f"Pegawai TIDAK HADIR pada {date_str}. Sebab Ketidakhadiran: {reason}")
+                lines.append(f"Pegawai TIDAK HADIR pada {date_str}.\n Sebab Ketidakhadiran: {reason}")
             else:
                 mtype = r.get("meeting_type", "")
                 if mtype == "MESYUARAT":
