@@ -247,6 +247,60 @@ def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: 
         log_msg(f"TRACEBACK: {traceback.format_exc()}")
         return False
 
+def create_calendar_event_for_luar_daerah(date_str: str, officer_code: str, urusan_rasmi: str, status_keahlian: str) -> bool:
+    """
+    Create an all-day event for LUAR DAERAH that blocks the whole day.
+    """
+    import sys
+    
+    def log_msg(msg):
+        print(f"CALENDAR_DEBUG: {msg}")
+        sys.stdout.flush()
+        
+    log_msg(f"Starting all-day event creation for {officer_code} on {date_str}")
+    
+    cal_id = _get_calendar_id_for_officer(officer_code)
+    if not cal_id:
+        log_msg(f"ERROR: No calendar ID for {officer_code}")
+        return False
+        
+    log_msg(f"Using calendar ID: {cal_id}")
+    
+    try:
+        service = _get_calendar_service()
+        log_msg("Service created successfully")
+
+        # Parse date for all-day event
+        log_msg("Parsing date for all-day event...")
+        event_date = datetime.strptime(date_str, DATE_FMT).date()
+        log_msg(f"Parsed date: {event_date}")
+
+        # Create all-day event (Google Calendar uses exclusive end dates for all-day events)
+        event = {
+            "summary": f"LUAR DAERAH — {_code_to_label(officer_code)}",
+            "location": "LUAR DAERAH",
+            "description": f"Urusan Rasmi: {urusan_rasmi}\nStatus Keahlian: {status_keahlian}",
+            "start": {"date": event_date.isoformat()},
+            "end": {"date": (event_date + timedelta(days=1)).isoformat()},  # All-day events use date only
+            "reminders": {"useDefault": True},
+        }
+        log_msg(f"All-day event object created: {json.dumps(event, indent=2)}")
+        
+        log_msg("Making API call for all-day event...")
+        created = service.events().insert(calendarId=cal_id, body=event).execute()
+        log_msg(f"SUCCESS: All-day event created with ID: {created.get('id')}")
+        return True
+        
+    except HttpError as e:
+        log_msg(f"Google Calendar API HTTP error: {e}")
+        log_msg(f"HTTP error details: status={e.resp.status}, reason={e.resp.reason}")
+        return False
+    except Exception as e:
+        log_msg(f"EXCEPTION: {type(e).__name__}: {str(e)}")
+        import traceback
+        log_msg(f"TRACEBACK: {traceback.format_exc()}")
+        return False
+
 # -----------------------------
 # Utilities
 # -----------------------------
@@ -505,11 +559,48 @@ async def admin_membership_status(update: Update, context: ContextTypes.DEFAULT_
     status_keahlian = update.message.text.strip()
     context.user_data["status_keahlian"] = status_keahlian
 
-    await update.message.reply_text(
-        "Nyatakan masa mula urusan (HH:MM):", 
-        reply_markup=ReplyKeyboardRemove()
-    )
-    return ADMIN_OFFICIAL_BUSINESS_START
+    # Check if it's LUAR DAERAH - if yes, skip time questions and save directly
+    if context.user_data["lokasi"] == "LUAR DAERAH":
+        # Save LUAR DAERAH to Sheets (no start/end time needed)
+        save_status(
+            date_str=context.user_data["date"],
+            officer_code=context.user_data["officer"],
+            lokasi=context.user_data["lokasi"],
+            urusan_rasmi=context.user_data["urusan_rasmi"],
+            status_keahlian=context.user_data["status_keahlian"],
+            start_time="",  # Empty for LUAR DAERAH
+            end_time="",    # Empty for LUAR DAERAH
+            updated_by=context.user_data.get("username", "admin"),
+        )
+
+        # Add all-day event to Google Calendar for LUAR DAERAH
+        cal_ok = create_calendar_event_for_luar_daerah(
+            date_str=context.user_data["date"],
+            officer_code=context.user_data["officer"],
+            urusan_rasmi=context.user_data["urusan_rasmi"],
+            status_keahlian=context.user_data["status_keahlian"]
+        )
+
+        if cal_ok:
+            await update.message.reply_text(
+                "Status LUAR DAERAH berjaya dikemaskini ke Google Calendar (acara sepanjang hari).\n\nTerima kasih.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        else:
+            await update.message.reply_text(
+                "Status LUAR DAERAH berjaya dikemaskini. (Gagal menambah acara sepanjang hari ke Calendar — semak konfigurasi.)\n\nTerima kasih.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+
+        await _prompt_admin_continue(update)
+        return ADMIN_CONTINUE_DECISION
+    else:
+        # For KENINGAU, ask for time details
+        await update.message.reply_text(
+            "Nyatakan masa mula urusan (HH:MM):", 
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return ADMIN_OFFICIAL_BUSINESS_START
 
 async def admin_official_business_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_time = parse_time_hhmm(update.message.text)
@@ -529,7 +620,7 @@ async def admin_official_business_end(update: Update, context: ContextTypes.DEFA
 
     context.user_data["end_time"] = end_time
 
-    # Save to Sheets
+    # Save to Sheets (for KENINGAU)
     save_status(
         date_str=context.user_data["date"],
         officer_code=context.user_data["officer"],
@@ -541,7 +632,7 @@ async def admin_official_business_end(update: Update, context: ContextTypes.DEFA
         updated_by=context.user_data.get("username", "admin"),
     )
 
-    # Add to Google Calendar
+    # Add to Google Calendar (for KENINGAU)
     cal_ok = create_calendar_event_for_meeting(
         date_str=context.user_data["date"],
         start_time=context.user_data["start_time"],
@@ -671,7 +762,10 @@ async def staff_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"Lokasi: {lokasi}")
             lines.append(f"Urusan Rasmi: {urusan_rasmi}")
             lines.append(f"Status Keahlian: {status_keahlian}")
-            lines.append(f"Masa: {start_time} - {end_time}")
+            if lokasi == "LUAR DAERAH":
+                lines.append(f"Masa: Sepanjang Hari")
+            else:
+                lines.append(f"Masa: {start_time} - {end_time}")
             lines.append("---")
 
         await update.message.reply_text("\n".join(lines), reply_markup=post_check_keyboard())
