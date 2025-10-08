@@ -78,7 +78,6 @@ except Exception:
     _CALENDAR_IDS_OVERRIDE = None
 
 CALENDAR_IDS = _CALENDAR_IDS_OVERRIDE or {
-    
     "DO": os.getenv("CAL_DO"),
     "ADO_PENTADBIRAN": os.getenv("CAL_ADO_PENTADBIRAN"),
     "ADO_PEMBANGUNAN": os.getenv("CAL_ADO_PEMBANGUNAN"),
@@ -248,40 +247,6 @@ def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: 
         log_msg(f"TRACEBACK: {traceback.format_exc()}")
         return False
 
-def create_calendar_event_for_official(date_str: str, officer_code: str, lokasi: str, status_keahliaan: str = "") -> bool:
-    """
-    Create an all-day event on officer's calendar for LUAR DAERAH.
-    Returns True on success, False on failure.
-    """
-    cal_id = _get_calendar_id_for_officer(officer_code)
-    if not cal_id:
-        print(f"No calendar configured for officer {officer_code}")
-        return False
-
-    try:
-        d = datetime.strptime(date_str, DATE_FMT).date()
-        # Google Calendar all-day event uses 'date' and end date is exclusive
-        event = {
-            "summary": f"Urusan Rasmi — {_code_to_label(officer_code)}",
-            "location": lokasi or "",
-            "description": status_keahlian or "",
-            "start": {"date": d.isoformat()},
-            "end": {"date": (d + timedelta(days=1)).isoformat()},
-            "reminders": {"useDefault": True},
-        }
-
-        service = _get_calendar_service()
-        created = service.events().insert(calendarId=cal_id, body=event).execute()
-        print("Created official event:", created.get("id"))
-        return True
-    except HttpError as e:
-        print("Google Calendar API error (official):", e)
-        return False
-    except Exception as e:
-        print("Error creating official event:", e)
-        return False
-
-
 # -----------------------------
 # Utilities
 # -----------------------------
@@ -355,12 +320,12 @@ def attendance_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True,
     )
 
-def two_choice_keyboard() -> ReplyKeyboardMarkup:
-    # choices: Pengerusi, Ahli Biasa, Perasmi, Jemputan
+def membership_status_keyboard() -> ReplyKeyboardMarkup:
+    # choices: Pengerusi, Ahli Biasa, Persami, Jemputan
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("Pengerusi"), KeyboardButton("Ahli Biasa"), KeyboardButton("Perasmi"), KeyboardButton("Jemputan")],
-            
+            [KeyboardButton("Pengerusi"), KeyboardButton("Ahli Biasa")],
+            [KeyboardButton("Persami"), KeyboardButton("Jemputan")],
         ],
         one_time_keyboard=True,
         resize_keyboard=True,
@@ -512,117 +477,99 @@ async def admin_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ADMIN_OFFICER
     context.user_data["officer"] = code
 
-    await update.message.reply_text("Namakan urusan rasmi pegawai:", reply_markup=ReplyKeyboardRemove())
-    return ADMIN_OFFICIAL_BUSINESS
+    await update.message.reply_text("Sila pilih lokasi:", reply_markup=attendance_keyboard())
+    return ADMIN_LOCATION
 
-async def admin_attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = update.message.text.strip().upper()
     if choice not in ("KENINGAU", "LUAR DAERAH"):
         await update.message.reply_text("Sila pilih KENINGAU atau LUAR DAERAH dari papan kekunci.")
         return ADMIN_LOCATION
     context.user_data["lokasi"] = choice
 
-    if choice == "LUAR DAERAH":
-        await update.message.reply_text("Namakan urusan rasmi pegawai:", reply_markup=ReplyKeyboardRemove())
-        return ADMIN_OFFICIAL_BUSINESS
-    else:
-        # Ask if mesyuarat, urusan rasmi, or Tiada
-        await update.message.reply_text(
-            "Sila nyatakan status keahlian pegawai:", reply_markup=ReplyKeyboardRemove()
-        )
-        return ADMIN_MEMBERSHIP_STATUS
+    # Both KENINGAU and LUAR DAERAH follow the same flow
+    await update.message.reply_text("Namakan urusan rasmi pegawai:", reply_markup=ReplyKeyboardRemove())
+    return ADMIN_OFFICIAL_BUSINESS
 
-async def _prompt_admin_continue(update: Update):
+async def admin_official_business(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    urusan_rasmi = update.message.text.strip()
+    context.user_data["urusan_rasmi"] = urusan_rasmi
+
     await update.message.reply_text(
-        "Status telah berjaya dikemaskini.\n\n"
-        "Adakah anda ingin meneruskan kemaskini untuk tarikh atau pegawai lain?",
-        reply_markup=yes_no_keyboard(),
+        "Nyatakan status keahlian pegawai:", 
+        reply_markup=membership_status_keyboard()
     )
+    return ADMIN_MEMBERSHIP_STATUS
 
-async def admin_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["reason"] = update.message.text.strip()
+async def admin_membership_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    status_keahlian = update.message.text.strip()
+    context.user_data["status_keahlian"] = status_keahlian
+
+    await update.message.reply_text(
+        "Nyatakan masa mula urusan (HH:MM):", 
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return ADMIN_OFFICIAL_BUSINESS_START
+
+async def admin_official_business_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    start_time = parse_time_hhmm(update.message.text)
+    if not start_time:
+        await update.message.reply_text("Format masa tidak sah. Gunakan HH:MM (cth 09:00).")
+        return ADMIN_OFFICIAL_BUSINESS_START
+    
+    context.user_data["start_time"] = start_time
+    await update.message.reply_text("Nyatakan masa tamat urusan (HH:MM):")
+    return ADMIN_OFFICIAL_BUSINESS_END
+
+async def admin_official_business_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    end_time = parse_time_hhmm(update.message.text)
+    if not end_time:
+        await update.message.reply_text("Format masa tidak sah. Gunakan HH:MM (cth 17:00).")
+        return ADMIN_OFFICIAL_BUSINESS_END
+
+    context.user_data["end_time"] = end_time
+
     # Save to Sheets
     save_status(
         date_str=context.user_data["date"],
         officer_code=context.user_data["officer"],
-        location="LUAR DAERAH",
-        official_status=context.user_data.get("reason", ""),
-        membership_status="",
-        start_time="",
-        end_time="",
-        updated_by=context.user_data.get("username", "admin"),
-    )
-
-    # NEW: Add all-day "Luar Daerah" event to Calendar
-    cal_ok = create_calendar_event_for_absence(
-        date_str=context.user_data["date"],
-        officer_code=context.user_data["officer"],
-        reason=context.user_data.get("reason", "")
-    )
-
-    if cal_ok:
-        await update.message.reply_text(
-            "Status berjaya dikemaskini ke Google Calendar.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-    else:
-        await update.message.reply_text(
-            "Status berjaya dikemaskini. (Gagal menambah ketidakhadiran ke Calendar — semak konfigurasi.)",
-            reply_markup=ReplyKeyboardRemove()
-        )
-
-    await _prompt_admin_continue(update)
-    return ADMIN_CONTINUE_DECISION
-
-async def admin_official_business_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    t = parse_time_hhmm(update.message.text)
-    if not t:
-        await update.message.reply_text("Format masa tidak sah. Gunakan HH:MM (cth 09:00).")
-        return ADMIN_MEETING_START
-    context.user_data["start_time"] = t
-    await update.message.reply_text("Nyatakan masa tamat mesyuarat (HH:MM):")
-    return ADMIN_MEETING_END
-
-async def admin_official_business_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    t = parse_time_hhmm(update.message.text)
-    if not t:
-        await update.message.reply_text("Format masa tidak sah. Gunakan HH:MM (cth 10:30).")
-        return ADMIN_MEETING_END
-
-    context.user_data["end_time"] = t
-    # Save meeting row
-    save_status(
-        date_str=context.user_data["date"],
-        officer_code=context.user_data["officer"],
-        hadir="YA",
-        reason="",
-        meeting_type="MESYUARAT",
-        start_time=context.user_data.get("start_time", ""),
-        end_time=context.user_data.get("end_time", ""),
-        official_details="",
+        lokasi=context.user_data["lokasi"],
+        urusan_rasmi=context.user_data["urusan_rasmi"],
+        status_keahlian=context.user_data["status_keahlian"],
+        start_time=context.user_data["start_time"],
+        end_time=context.user_data["end_time"],
         updated_by=context.user_data.get("username", "admin"),
     )
 
     # Add to Google Calendar
     cal_ok = create_calendar_event_for_meeting(
         date_str=context.user_data["date"],
-        start_time=context.user_data.get("start_time", ""),
-        end_time=context.user_data.get("end_time", ""),
-        urusan_rasmi=context.user_data["urusan_rasmi"],
-        status_keahlian=context.user_data["status_keahlian"],
+        start_time=context.user_data["start_time"],
+        end_time=context.user_data["end_time"],
+        officer_code=context.user_data["officer"],
+        lokasi=context.user_data["lokasi"],
+        status_keahlian=context.user_data["status_keahlian"]
     )
 
     if cal_ok:
-        await update.message.reply_text("Status berjaya dikemaskini ke Google Calendar.",
-                                       reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(
+            "Status berjaya dikemaskini ke Google Calendar.\n\nTerima kasih.",
+            reply_markup=ReplyKeyboardRemove()
+        )
     else:
-        await update.message.reply_text("Status berjaya dikemaskini. (Gagal menambah acara ke Calendar — semak konfigurasi.)",
-                                       reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(
+            "Status berjaya dikemaskini. (Gagal menambah acara ke Calendar — semak konfigurasi.)\n\nTerima kasih.",
+            reply_markup=ReplyKeyboardRemove()
+        )
 
     await _prompt_admin_continue(update)
     return ADMIN_CONTINUE_DECISION
 
-
+async def _prompt_admin_continue(update: Update):
+    await update.message.reply_text(
+        "Adakah anda ingin meneruskan kemaskini untuk tarikh atau pegawai lain?",
+        reply_markup=yes_no_keyboard(),
+    )
 
 async def admin_continue_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = update.message.text.strip().upper()
@@ -715,19 +662,17 @@ async def staff_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         lines = []
         for r in records:
-            if r.get("hadir") == "TIDAK":
-                reason = r.get("reason", "(tiada sebab)")
-                lines.append(f"Pegawai TIDAK HADIR pada {date_str}.\n Sebab Ketidakhadiran: {reason}")
-            else:
-                mtype = r.get("meeting_type", "")
-                if mtype == "MESYUARAT":
-                    lines.append(f"Jadual {date_str}: Mesyuarat {r.get('start_time','')} - {r.get('end_time','')}")
-                elif mtype == "URUSAN_RASMI":
-                    lines.append(f"Jadual {date_str}: Urusan rasmi — {r.get('official_details','')}")
-                elif mtype == "TIADA":
-                    lines.append(f"Jadual {date_str}: HADIR — Tiada mesyuarat/urusan.")
-                else:
-                    lines.append(f"Jadual {date_str}: HADIR (tiada butiran)")
+            lokasi = r.get("lokasi", "")
+            urusan_rasmi = r.get("urusan rasmi", "")
+            status_keahlian = r.get("status keahlian", "")
+            start_time = r.get("start_time", "")
+            end_time = r.get("end_time", "")
+            
+            lines.append(f"Lokasi: {lokasi}")
+            lines.append(f"Urusan Rasmi: {urusan_rasmi}")
+            lines.append(f"Status Keahlian: {status_keahlian}")
+            lines.append(f"Masa: {start_time} - {end_time}")
+            lines.append("---")
 
         await update.message.reply_text("\n".join(lines), reply_markup=post_check_keyboard())
 
@@ -750,90 +695,3 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         # defensive: if user_data is not available for some reason, ignore
         pass
-
-    # Remove keyboards and notify user (handle message or callback_query)
-    try:
-        if update.message:
-            await update.message.reply_text("Sesi Dibatalkan.", reply_markup=ReplyKeyboardRemove())
-        elif update.callback_query:
-            # answer callback query then send a message
-            try:
-                await update.callback_query.answer()
-            except Exception:
-                pass
-            await update.effective_chat.send_message("Sesi Dibatalkan.", reply_markup=ReplyKeyboardRemove())
-        else:
-            # fallback
-            await update.effective_chat.send_message("Sesi Dibatalkan.", reply_markup=ReplyKeyboardRemove())
-    except Exception:
-        # last resort: ignore errors sending the confirmation
-        pass
-
-    return ConversationHandler.END
-
-def main():
-    if not BOT_TOKEN or not SPREADSHEET_ID:
-        raise RuntimeError("Please set BOT_TOKEN and SPREADSHEET_ID environment variables.")
-
-    application: Application = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    # Register global /cancel so it can be used anywhere
-    application.add_handler(CommandHandler("cancel", cancel))
-
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            CHOOSE_ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_role)],
-
-            # Admin states
-            ADMIN_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_username)],
-            ADMIN_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_password)],
-            ADMIN_DATE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_date)],
-            ADMIN_OFFICER:  [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_officer)],
-            ADMIN_ATTENDANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_attendance)],
-            ADMIN_ABSENCE_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_absence_reason)],
-            ADMIN_HAS_MEETING_OR_OFFICIAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_has_meeting_or_official)],
-            ADMIN_MEETING_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_meeting_start)],
-            ADMIN_MEETING_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_meeting_end)],
-            ADMIN_OFFICIAL_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_official_details)],
-            ADMIN_CONTINUE_DECISION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_continue_decision)],  # NEW
-
-            # Staff states
-            STAFF_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_date)],
-            STAFF_OFFICER: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_officer)],
-        },
-        # keep command fallback to handle cancellation during conversations
-        fallbacks=[CommandHandler("cancel", cancel)],
-        allow_reentry=True,
-    )
-
-    application.add_handler(conv)
-
-    # Configure webhook for Render Web Service
-    render_external_url = os.getenv("RENDER_EXTERNAL_URL")
-    if not render_external_url:
-        raise RuntimeError(
-            "RENDER_EXTERNAL_URL environment variable is required for webhook mode on Render."
-        )
-
-    port = int(os.getenv("PORT", "10000"))
-    webhook_path = os.getenv("WEBHOOK_PATH", BOT_TOKEN)
-    webhook_url = f"{render_external_url.rstrip('/')}/{webhook_path}"
-
-    # Start Application on a dedicated asyncio loop in the background
-    global _EVENT_LOOP
-    _EVENT_LOOP = asyncio.new_event_loop()
-    threading.Thread(target=_EVENT_LOOP.run_forever, daemon=True).start()
-
-    # initialize/start application and set webhook
-    asyncio.run_coroutine_threadsafe(application.initialize(), _EVENT_LOOP).result()
-    asyncio.run_coroutine_threadsafe(application.start(), _EVENT_LOOP).result()
-    asyncio.run_coroutine_threadsafe(application.bot.set_webhook(webhook_url), _EVENT_LOOP).result()
-
-    flask_app = create_flask_app(application)
-
-    print(f"Bot is running (Flask) on 0.0.0.0:{port} with path /{webhook_path}")
-    flask_app.run(host="0.0.0.0", port=port)
-
-if __name__ == "__main__":
-    main()
