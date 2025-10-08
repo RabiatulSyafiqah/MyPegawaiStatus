@@ -528,10 +528,9 @@ async def admin_attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         # Ask if mesyuarat, urusan rasmi, or Tiada
         await update.message.reply_text(
-            "Sila nyatakan sekiranya pegawai yang dikemas kini mempunyai mesyuarat, urusan rasmi, atau tiada sebarang urusan:",
-            reply_markup=two_choice_keyboard(),
+            "Sila nyatakan status keahlian pegawai:", reply_markup=ReplyKeyboardRemove()
         )
-        return ADMIN_HAS_MEETING_OR_OFFICIAL
+        return ADMIN_MEMBERSHIP_STATUS
 
 async def _prompt_admin_continue(update: Update):
     await update.message.reply_text(
@@ -540,22 +539,21 @@ async def _prompt_admin_continue(update: Update):
         reply_markup=yes_no_keyboard(),
     )
 
-async def admin_absence_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["reason"] = update.message.text.strip()
     # Save to Sheets
     save_status(
         date_str=context.user_data["date"],
         officer_code=context.user_data["officer"],
-        hadir="TIDAK",
-        reason=context.user_data.get("reason", ""),
-        meeting_type="",
+        location="LUAR DAERAH",
+        official_status=context.user_data.get("reason", ""),
+        membership_status="",
         start_time="",
         end_time="",
-        official_details="",
         updated_by=context.user_data.get("username", "admin"),
     )
 
-    # NEW: Add all-day "Tidak Hadir" event to Calendar
+    # NEW: Add all-day "Luar Daerah" event to Calendar
     cal_ok = create_calendar_event_for_absence(
         date_str=context.user_data["date"],
         officer_code=context.user_data["officer"],
@@ -576,40 +574,7 @@ async def admin_absence_reason(update: Update, context: ContextTypes.DEFAULT_TYP
     await _prompt_admin_continue(update)
     return ADMIN_CONTINUE_DECISION
 
-async def admin_has_meeting_or_official(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    if text == "Mesyuarat":
-        context.user_data["meeting_type"] = "MESYUARAT"
-        await update.message.reply_text("Nyatakan masa mula mesyuarat (HH:MM):", reply_markup=ReplyKeyboardRemove())
-        return ADMIN_MEETING_START
-    elif text == "Urusan rasmi":
-        context.user_data["meeting_type"] = "URUSAN"
-        await update.message.reply_text("Nyatakan tempoh masa dan butiran urusan:", reply_markup=ReplyKeyboardRemove())
-        return ADMIN_OFFICIAL_DETAILS
-    elif text == "Tiada":
-        # hadir tetapi tiada mesyuarat / urusan rasmi 
-        save_status(
-            date_str=context.user_data["date"],
-            officer_code=context.user_data["officer"],
-            hadir="YA",
-            reason="",
-            meeting_type="TIADA",
-            start_time="",
-            end_time="",
-            official_details="",
-            updated_by=context.user_data.get("username", "admin"),
-        )
-        await update.message.reply_text(
-            "Status telah berjaya dikemaskini (HADIR — tiada mesyuarat/urusan).",
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        await _prompt_admin_continue(update)
-        return ADMIN_CONTINUE_DECISION
-    else:
-        await update.message.reply_text("Sila pilih Mesyuarat, Urusan rasmi, atau Tiada dari papan kekunci.")
-        return ADMIN_HAS_MEETING_OR_OFFICIAL
-
-async def admin_meeting_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_official_business_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     t = parse_time_hhmm(update.message.text)
     if not t:
         await update.message.reply_text("Format masa tidak sah. Gunakan HH:MM (cth 09:00).")
@@ -618,7 +583,7 @@ async def admin_meeting_start(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("Nyatakan masa tamat mesyuarat (HH:MM):")
     return ADMIN_MEETING_END
 
-async def admin_meeting_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_official_business_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     t = parse_time_hhmm(update.message.text)
     if not t:
         await update.message.reply_text("Format masa tidak sah. Gunakan HH:MM (cth 10:30).")
@@ -643,8 +608,8 @@ async def admin_meeting_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
         date_str=context.user_data["date"],
         start_time=context.user_data.get("start_time", ""),
         end_time=context.user_data.get("end_time", ""),
-        officer_code=context.user_data["officer"],
-        details=""  # optional details
+        urusan_rasmi=context.user_data["urusan_rasmi"],
+        status_keahlian=context.user_data["status_keahlian"],
     )
 
     if cal_ok:
@@ -657,37 +622,7 @@ async def admin_meeting_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _prompt_admin_continue(update)
     return ADMIN_CONTINUE_DECISION
 
-async def admin_official_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["official_details"] = update.message.text.strip()
-    # Save official duty row
-    save_status(
-        date_str=context.user_data["date"],
-        officer_code=context.user_data["officer"],
-        hadir="YA",
-        reason="",
-        meeting_type="URUSAN_RASMI",
-        start_time="",
-        end_time="",
-        official_details=context.user_data.get("official_details", ""),
-        updated_by=context.user_data.get("username", "admin"),
-    )
 
-    # Add to Google Calendar (all-day event)
-    cal_ok = create_calendar_event_for_official(
-        date_str=context.user_data["date"],
-        officer_code=context.user_data["officer"],
-        details=context.user_data.get("official_details", "")
-    )
-
-    if cal_ok:
-        await update.message.reply_text("Status berjaya dikemaskini ke Google Calendar.",
-                                       reply_markup=ReplyKeyboardRemove())
-    else:
-        await update.message.reply_text("Status berjaya dikemaskini. (Gagal menambah ke Calendar — semak konfigurasi.)",
-                                       reply_markup=ReplyKeyboardRemove())
-
-    await _prompt_admin_continue(update)
-    return ADMIN_CONTINUE_DECISION
 
 async def admin_continue_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = update.message.text.strip().upper()
