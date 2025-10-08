@@ -695,3 +695,125 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         # defensive: if user_data is not available for some reason, ignore
         pass
+
+    # Remove keyboards and notify user (handle message or callback_query)
+    try:
+        if update.message:
+            await update.message.reply_text("Sesi Dibatalkan.", reply_markup=ReplyKeyboardRemove())
+        elif update.callback_query:
+            # answer callback query then send a message
+            try:
+                await update.callback_query.answer()
+            except Exception:
+                pass
+            await update.effective_chat.send_message("Sesi Dibatalkan.", reply_markup=ReplyKeyboardRemove())
+        else:
+            # fallback
+            await update.effective_chat.send_message("Sesi Dibatalkan.", reply_markup=ReplyKeyboardRemove())
+    except Exception:
+        # last resort: ignore errors sending the confirmation
+        pass
+
+    return ConversationHandler.END
+
+def main():
+    if not BOT_TOKEN or not SPREADSHEET_ID:
+        raise RuntimeError("Please set BOT_TOKEN and SPREADSHEET_ID environment variables.")
+
+    # For local development, use polling instead of webhook
+    if os.getenv("RENDER"):
+        # Webhook mode for Render
+        application: Application = ApplicationBuilder().token(BOT_TOKEN).build()
+        
+        # Register global /cancel so it can be used anywhere
+        application.add_handler(CommandHandler("cancel", cancel))
+
+        conv = ConversationHandler(
+            entry_points=[CommandHandler("start", start)],
+            states={
+                CHOOSE_ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_role)],
+
+                # Admin states
+                ADMIN_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_username)],
+                ADMIN_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_password)],
+                ADMIN_DATE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_date)],
+                ADMIN_OFFICER:  [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_officer)],
+                ADMIN_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_location)],
+                ADMIN_OFFICIAL_BUSINESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_official_business)],
+                ADMIN_MEMBERSHIP_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_membership_status)],
+                ADMIN_OFFICIAL_BUSINESS_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_official_business_start)],
+                ADMIN_OFFICIAL_BUSINESS_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_official_business_end)],
+                ADMIN_CONTINUE_DECISION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_continue_decision)],
+
+                # Staff states
+                STAFF_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_date)],
+                STAFF_OFFICER: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_officer)],
+            },
+            fallbacks=[CommandHandler("cancel", cancel)],
+            allow_reentry=True,
+        )
+
+        application.add_handler(conv)
+
+        # Configure webhook for Render Web Service
+        render_external_url = os.getenv("RENDER_EXTERNAL_URL")
+        if not render_external_url:
+            raise RuntimeError("RENDER_EXTERNAL_URL environment variable is required for webhook mode on Render.")
+
+        port = int(os.getenv("PORT", "10000"))
+        webhook_path = os.getenv("WEBHOOK_PATH", BOT_TOKEN)
+        webhook_url = f"{render_external_url.rstrip('/')}/{webhook_path}"
+
+        # Start Application on a dedicated asyncio loop in the background
+        global _EVENT_LOOP
+        _EVENT_LOOP = asyncio.new_event_loop()
+        threading.Thread(target=_EVENT_LOOP.run_forever, daemon=True).start()
+
+        # initialize/start application and set webhook
+        asyncio.run_coroutine_threadsafe(application.initialize(), _EVENT_LOOP).result()
+        asyncio.run_coroutine_threadsafe(application.start(), _EVENT_LOOP).result()
+        asyncio.run_coroutine_threadsafe(application.bot.set_webhook(webhook_url), _EVENT_LOOP).result()
+
+        flask_app = create_flask_app(application)
+
+        print(f"Bot is running (Flask) on 0.0.0.0:{port} with path /{webhook_path}")
+        flask_app.run(host="0.0.0.0", port=port)
+    else:
+        # Polling mode for local development
+        application: Application = ApplicationBuilder().token(BOT_TOKEN).build()
+        
+        # Register global /cancel so it can be used anywhere
+        application.add_handler(CommandHandler("cancel", cancel))
+
+        conv = ConversationHandler(
+            entry_points=[CommandHandler("start", start)],
+            states={
+                CHOOSE_ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_role)],
+
+                # Admin states
+                ADMIN_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_username)],
+                ADMIN_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_password)],
+                ADMIN_DATE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_date)],
+                ADMIN_OFFICER:  [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_officer)],
+                ADMIN_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_location)],
+                ADMIN_OFFICIAL_BUSINESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_official_business)],
+                ADMIN_MEMBERSHIP_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_membership_status)],
+                ADMIN_OFFICIAL_BUSINESS_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_official_business_start)],
+                ADMIN_OFFICIAL_BUSINESS_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_official_business_end)],
+                ADMIN_CONTINUE_DECISION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_continue_decision)],
+
+                # Staff states
+                STAFF_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_date)],
+                STAFF_OFFICER: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_officer)],
+            },
+            fallbacks=[CommandHandler("cancel", cancel)],
+            allow_reentry=True,
+        )
+
+        application.add_handler(conv)
+
+        print("Bot is running in polling mode...")
+        application.run_polling()
+
+if __name__ == "__main__":
+    main()
