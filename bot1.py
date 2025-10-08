@@ -177,7 +177,7 @@ def _code_to_label(code: str) -> str:
             return lab
     return code
 
-def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: str, officer_code: str, lokasi: str, status_keahlian: str) -> bool:
+def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: str, officer_code: str, lokasi: str, urusan_rasmi: str, status_keahlian: str) -> bool:
     import sys
     
     # Force flush output to ensure Render shows it
@@ -220,12 +220,12 @@ def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: 
             dt_end = dt_end.replace(tzinfo=tz)
             log_msg("Applied timezone to datetime objects")
 
-        # Create event object
+        # Create event object with all data
         log_msg("Creating event object...")
         event = {
             "summary": f"Urusan Rasmi — {_code_to_label(officer_code)}",
             "location": lokasi or "",
-            "description": status_keahlian or "",
+            "description": f"Urusan Rasmi: {urusan_rasmi}\nStatus Keahlian: {status_keahlian}\nLokasi: {lokasi}",
             "start": {"dateTime": dt_start.isoformat(), "timeZone": BOT_TIMEZONE},
             "end": {"dateTime": dt_end.isoformat(), "timeZone": BOT_TIMEZONE},
             "reminders": {"useDefault": True},
@@ -275,11 +275,12 @@ def create_calendar_event_for_luar_daerah(date_str: str, officer_code: str, urus
         event_date = datetime.strptime(date_str, DATE_FMT).date()
         log_msg(f"Parsed date: {event_date}")
 
-        # Create all-day event (Google Calendar uses exclusive end dates for all-day events)
+        # Create all-day event with all data
+        log_msg("Creating all-day event object...")
         event = {
             "summary": f"LUAR DAERAH — {_code_to_label(officer_code)}",
             "location": "LUAR DAERAH",
-            "description": f"Urusan Rasmi: {urusan_rasmi}\nStatus Keahlian: {status_keahlian}",
+            "description": f"Urusan Rasmi: {urusan_rasmi}\nStatus Keahlian: {status_keahlian}\nLokasi: LUAR DAERAH",
             "start": {"date": event_date.isoformat()},
             "end": {"date": (event_date + timedelta(days=1)).isoformat()},  # All-day events use date only
             "reminders": {"useDefault": True},
@@ -639,6 +640,7 @@ async def admin_official_business_end(update: Update, context: ContextTypes.DEFA
         end_time=context.user_data["end_time"],
         officer_code=context.user_data["officer"],
         lokasi=context.user_data["lokasi"],
+        urusan_rasmi=context.user_data["urusan_rasmi"],
         status_keahlian=context.user_data["status_keahlian"]
     )
 
