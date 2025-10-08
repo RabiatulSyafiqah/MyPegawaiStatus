@@ -100,19 +100,18 @@ def _get_ws():
     sh = client.open_by_key(SPREADSHEET_ID)
     # ensure tab
     try:
-        ws = sh.worksheet("status_log")
+        ws = sh.worksheet("Sheet1")
     except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title="status_log", rows=1000, cols=10)
+        ws = sh.add_worksheet(title="status_log", rows=1000, cols=9)
         ws.append_row(
             [
                 "date",
                 "officer",
-                "hadir",
-                "reason",
-                "meeting_type",
+                "lokasi",
+                "urusan rasmi",
+                "status keahlian",
                 "start_time",
                 "end_time",
-                "official_details",
                 "updated_by",
                 "updated_at",
             ]
@@ -122,12 +121,11 @@ def _get_ws():
 def save_status(
     date_str: str,
     officer_code: str,
-    hadir: str,
-    reason: str,
-    meeting_type: str,
+    lokasi: str,
+    urusan_rasmi: str,
+    status_keahlian: str,
     start_time: str,
     end_time: str,
-    official_details: str,
     updated_by: str,
 ):
     ws = _get_ws()
@@ -135,12 +133,11 @@ def save_status(
         [
             date_str,
             officer_code,
-            hadir,
-            reason,
-            meeting_type,
+            lokasi,
+            urusan_rasmi,
+            status_keahlian,
             start_time,
             end_time,
-            official_details,
             updated_by,
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         ]
@@ -181,7 +178,7 @@ def _code_to_label(code: str) -> str:
             return lab
     return code
 
-def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: str, officer_code: str, details: str = "") -> bool:
+def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: str, officer_code: str, lokasi: str, status_keahlian: str) -> bool:
     import sys
     
     # Force flush output to ensure Render shows it
@@ -227,8 +224,9 @@ def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: 
         # Create event object
         log_msg("Creating event object...")
         event = {
-            "summary": f"Mesyuarat — {_code_to_label(officer_code)}",
-            "description": details or "",
+            "summary": f"Urusan Rasmi — {_code_to_label(officer_code)}",
+            "location": lokasi or "",
+            "description": status_keahlian or "",
             "start": {"dateTime": dt_start.isoformat(), "timeZone": BOT_TIMEZONE},
             "end": {"dateTime": dt_end.isoformat(), "timeZone": BOT_TIMEZONE},
             "reminders": {"useDefault": True},
@@ -250,9 +248,9 @@ def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: 
         log_msg(f"TRACEBACK: {traceback.format_exc()}")
         return False
 
-def create_calendar_event_for_official(date_str: str, officer_code: str, details: str = "") -> bool:
+def create_calendar_event_for_official(date_str: str, officer_code: str, lokasi: str, status_keahliaan: str = "") -> bool:
     """
-    Create an all-day event on officer's calendar for URUSAN RASMI.
+    Create an all-day event on officer's calendar for LUAR DAERAH.
     Returns True on success, False on failure.
     """
     cal_id = _get_calendar_id_for_officer(officer_code)
@@ -265,7 +263,8 @@ def create_calendar_event_for_official(date_str: str, officer_code: str, details
         # Google Calendar all-day event uses 'date' and end date is exclusive
         event = {
             "summary": f"Urusan Rasmi — {_code_to_label(officer_code)}",
-            "description": details or "",
+            "location": lokasi or "",
+            "description": status_keahlian or "",
             "start": {"date": d.isoformat()},
             "end": {"date": (d + timedelta(days=1)).isoformat()},
             "reminders": {"useDefault": True},
@@ -282,36 +281,6 @@ def create_calendar_event_for_official(date_str: str, officer_code: str, details
         print("Error creating official event:", e)
         return False
 
-def create_calendar_event_for_absence(date_str: str, officer_code: str, reason: str = "") -> bool:
-    """
-    Create an all-day Calendar event marking the officer as TIDAK HADIR.
-    """
-    cal_id = _get_calendar_id_for_officer(officer_code)
-    if not cal_id:
-        print(f"No calendar configured for officer {officer_code} (absence)")
-        return False
-
-    try:
-        d = datetime.strptime(date_str, DATE_FMT).date()
-        event = {
-            "summary": f"Tidak Hadir — {_code_to_label(officer_code)}",
-            "description": (reason or "").strip(),
-            # All-day event: end.date is exclusive
-            "start": {"date": d.isoformat()},
-            "end": {"date": (d + timedelta(days=1)).isoformat()},
-            "reminders": {"useDefault": True},
-        }
-
-        service = _get_calendar_service()
-        created = service.events().insert(calendarId=cal_id, body=event).execute()
-        print("Created absence event:", created.get("id"))
-        return True
-    except HttpError as e:
-        print("Google Calendar API error (absence):", e)
-        return False
-    except Exception as e:
-        print("Error creating absence event:", e)
-        return False
 
 # -----------------------------
 # Utilities
@@ -379,19 +348,19 @@ def yes_no_keyboard() -> ReplyKeyboardMarkup:
     )
 
 def attendance_keyboard() -> ReplyKeyboardMarkup:
-    # Admin attendance input expects "HADIR" or "TIDAK HADIR"
+    # Admin attendance input expects "KENINGAU" or "LUAR DAERAH"
     return ReplyKeyboardMarkup(
-        [[KeyboardButton("HADIR"), KeyboardButton("TIDAK HADIR")]],
+        [[KeyboardButton("KENINGAU"), KeyboardButton("LUAR DAERAH")]],
         one_time_keyboard=True,
         resize_keyboard=True,
     )
 
 def two_choice_keyboard() -> ReplyKeyboardMarkup:
-    # choices: Mesyuarat, Urusan rasmi, Tiada (hadir tapi tiada urusan)
+    # choices: Pengerusi, Ahli Biasa, Perasmi, Jemputan
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("Mesyuarat"), KeyboardButton("Urusan rasmi")],
-            [KeyboardButton("Tiada")],
+            [KeyboardButton("Pengerusi"), KeyboardButton("Ahli Biasa"), KeyboardButton("Perasmi"), KeyboardButton("Jemputan")],
+            
         ],
         one_time_keyboard=True,
         resize_keyboard=True,
@@ -448,26 +417,27 @@ def create_flask_app(app_telegram: Application) -> Flask:
     ADMIN_PASSWORD,
     ADMIN_DATE,
     ADMIN_OFFICER,
-    ADMIN_ATTENDANCE,
-    ADMIN_ABSENCE_REASON,
-    ADMIN_HAS_MEETING_OR_OFFICIAL,
-    ADMIN_MEETING_START,
-    ADMIN_MEETING_END,
-    ADMIN_OFFICIAL_DETAILS,
+    ADMIN_LOCATION,
+    ADMIN_OFFICIAL_BUSINESS,
+    ADMIN_MEMBERSHIP_STATUS,
+    ADMIN_OFFICIAL_BUSINESS_START,
+    ADMIN_OFFICIAL_BUSINESS_END,
     STAFF_DATE,
     STAFF_OFFICER,
     ADMIN_CONTINUE_DECISION,  
-) = range(14)
+) = range(13)
 
 # -----------------------------
 # Handlers
 # -----------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "Sila pilih jenis kakitangan:\n"
+        "Selamat datang ke *MyPegawaiStatus!* 🏛️\n\n"
+        "Sila pilih kategori kakitangan anda:\n"
         "1. Kakitangan Admin\n"
-        "2. Kakitangan Biasa"
+        "2. Kakitangan Biasa"\
     )
+    
     if update.message:
         await update.message.reply_text(text, reply_markup=role_keyboard())
     else:
@@ -542,19 +512,19 @@ async def admin_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ADMIN_OFFICER
     context.user_data["officer"] = code
 
-    await update.message.reply_text("Sila masukkan status kehadiran pegawai:", reply_markup=attendance_keyboard())
-    return ADMIN_ATTENDANCE
+    await update.message.reply_text("Namakan urusan rasmi pegawai:", reply_markup=ReplyKeyboardRemove())
+    return ADMIN_OFFICIAL_BUSINESS
 
 async def admin_attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = update.message.text.strip().upper()
-    if choice not in ("HADIR", "TIDAK HADIR"):
-        await update.message.reply_text("Sila pilih HADIR atau TIDAK HADIR dari papan kekunci.")
-        return ADMIN_ATTENDANCE
-    context.user_data["hadir"] = choice
+    if choice not in ("KENINGAU", "LUAR DAERAH"):
+        await update.message.reply_text("Sila pilih KENINGAU atau LUAR DAERAH dari papan kekunci.")
+        return ADMIN_LOCATION
+    context.user_data["lokasi"] = choice
 
-    if choice == "TIDAK HADIR":
-        await update.message.reply_text("Nyatakan sebab ketidakhadiran pegawai:", reply_markup=ReplyKeyboardRemove())
-        return ADMIN_ABSENCE_REASON
+    if choice == "LUAR DAERAH":
+        await update.message.reply_text("Namakan urusan rasmi pegawai:", reply_markup=ReplyKeyboardRemove())
+        return ADMIN_OFFICIAL_BUSINESS
     else:
         # Ask if mesyuarat, urusan rasmi, or Tiada
         await update.message.reply_text(
