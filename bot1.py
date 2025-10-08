@@ -223,7 +223,7 @@ def create_calendar_event_for_meeting(date_str: str, start_time: str, end_time: 
         # Create event object with all data
         log_msg("Creating event object...")
         event = {
-            "summary": f"Urusan Rasmi — {_code_to_label(officer_code)}",
+            "summary": f"KENINGAU — {_code_to_label(officer_code)}",
             "location": lokasi or "",
             "description": f"Urusan Rasmi: {urusan_rasmi}\nStatus Keahlian: {status_keahlian}\nLokasi: {lokasi}",
             "start": {"dateTime": dt_start.isoformat(), "timeZone": BOT_TIMEZONE},
