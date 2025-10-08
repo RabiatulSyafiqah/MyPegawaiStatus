@@ -101,7 +101,7 @@ def _get_ws():
     try:
         ws = sh.worksheet("Sheet1")
     except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title="status_log", rows=1000, cols=9)
+        ws = sh.add_worksheet(title="Sheet1", rows=1000, cols=9)
         ws.append_row(
             [
                 "date",
