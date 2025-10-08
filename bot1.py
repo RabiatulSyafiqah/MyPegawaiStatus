@@ -325,7 +325,7 @@ def membership_status_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("Pengerusi"), KeyboardButton("Ahli Biasa")],
-            [KeyboardButton("Persami"), KeyboardButton("Jemputan")],
+            [KeyboardButton("Perasmi"), KeyboardButton("Jemputan")],
         ],
         one_time_keyboard=True,
         resize_keyboard=True,
