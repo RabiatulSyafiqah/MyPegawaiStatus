@@ -147,7 +147,11 @@ def query_status(date_str: str, officer_code: str) -> List[Dict[str, str]]:
     rows = ws.get_all_records()
     results = []
     for r in rows:
-        if (r.get("date") == date_str) and (r.get("officer") == officer_code):
+        # Try different possible column name variations
+        record_date = r.get("date") or r.get("Date") or r.get("DATE")
+        record_officer = r.get("officer") or r.get("Officer") or r.get("OFFICER")
+        
+        if (record_date == date_str) and (record_officer == officer_code):
             results.append(r)
     return results
 
@@ -755,11 +759,12 @@ async def staff_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         lines = []
         for r in records:
-            lokasi = r.get("lokasi", "")
-            urusan_rasmi = r.get("urusan rasmi", "")
-            status_keahlian = r.get("status keahlian", "")
-            start_time = r.get("start_time", "")
-            end_time = r.get("end_time", "")
+            # Try multiple column name variations to handle different spreadsheet formats
+            lokasi = r.get("lokasi", "") or r.get("Lokasi", "") or r.get("LOKASI", "")
+            urusan_rasmi = r.get("urusan rasmi", "") or r.get("Urusan Rasmi", "") or r.get("urusan_rasmi", "") or r.get("URUSAN_RASMI", "")
+            status_keahlian = r.get("status keahlian", "") or r.get("Status Keahlian", "") or r.get("status_keahlian", "") or r.get("STATUS_KEAHLIAN", "")
+            start_time = r.get("start_time", "") or r.get("Start Time", "") or r.get("start time", "") or r.get("START_TIME", "")
+            end_time = r.get("end_time", "") or r.get("End Time", "") or r.get("end time", "") or r.get("END_TIME", "")
             
             lines.append(f"Lokasi: {lokasi}")
             lines.append(f"Urusan Rasmi: {urusan_rasmi}")
@@ -771,7 +776,8 @@ async def staff_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif start_time and end_time:
                 lines.append(f"Masa: {start_time} - {end_time}")
             else:
-                lines.append("Masa: Tidak dinyatakan")
+                # Show what we found for debugging
+                lines.append(f"Masa: {start_time if start_time else 'Tidak dinyatakan'} - {end_time if end_time else 'Tidak dinyatakan'}")
             
             lines.append("---")
 
@@ -780,7 +786,7 @@ async def staff_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["checked_once"] = True
     return STAFF_OFFICER
-    
+
 # --- Misc ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
