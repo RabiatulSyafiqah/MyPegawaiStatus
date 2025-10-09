@@ -764,17 +764,23 @@ async def staff_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"Lokasi: {lokasi}")
             lines.append(f"Urusan Rasmi: {urusan_rasmi}")
             lines.append(f"Status Keahlian: {status_keahlian}")
+            
+            # FIXED: Proper time display logic
             if lokasi == "LUAR DAERAH":
-                lines.append(f"Masa: Sepanjang Hari")
-            else:
+                lines.append("Masa: Sepanjang Hari")
+            elif start_time and end_time:
                 lines.append(f"Masa: {start_time} - {end_time}")
+            else:
+                lines.append("Masa: Tidak dinyatakan")
+            
             lines.append("---")
 
-        await update.message.reply_text("\n".join(lines), reply_markup=post_check_keyboard())
+        response_text = "\n".join(lines)
+        await update.message.reply_text(response_text, reply_markup=post_check_keyboard())
 
     context.user_data["checked_once"] = True
     return STAFF_OFFICER
-
+    
 # --- Misc ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
