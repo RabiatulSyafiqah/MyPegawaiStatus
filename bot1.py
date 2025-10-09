@@ -128,6 +128,11 @@ def save_status(
     updated_by: str,
 ):
     ws = _get_ws()
+    
+    # DEBUG: Print what we're saving
+    print(f"DEBUG SAVING: date={date_str}, officer={officer_code}, lokasi={lokasi}")
+    print(f"DEBUG SAVING: start_time='{start_time}', end_time='{end_time}'")
+    
     ws.append_row(
         [
             date_str,
@@ -141,20 +146,32 @@ def save_status(
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         ]
     )
-
+    print("DEBUG: Data saved to Google Sheets")
+    
 def query_status(date_str: str, officer_code: str) -> List[Dict[str, str]]:
     ws = _get_ws()
     rows = ws.get_all_records()
     results = []
+    
+    # DEBUG: Print column names to see what we're working with
+    if rows:
+        print(f"DEBUG COLUMN NAMES: {list(rows[0].keys())}")
+    
     for r in rows:
-        # Try different possible column name variations
-        record_date = r.get("date") or r.get("Date") or r.get("DATE")
-        record_officer = r.get("officer") or r.get("Officer") or r.get("OFFICER")
+        # Try different possible column name variations for date
+        record_date = (r.get("date") or r.get("Date") or r.get("DATE") or 
+                      r.get("date ") or r.get("Date ") or "").strip()
+        
+        # Try different possible column name variations for officer
+        record_officer = (r.get("officer") or r.get("Officer") or r.get("OFFICER") or 
+                         r.get("officer ") or r.get("Officer ") or "").strip()
         
         if (record_date == date_str) and (record_officer == officer_code):
             results.append(r)
+    
+    print(f"DEBUG: Found {len(results)} records for {date_str}, {officer_code}")
     return results
-
+    
 # -----------------------------
 # Google Calendar helpers
 # -----------------------------
@@ -759,12 +776,27 @@ async def staff_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         lines = []
         for r in records:
-            # Try multiple column name variations to handle different spreadsheet formats
-            lokasi = r.get("lokasi", "") or r.get("Lokasi", "") or r.get("LOKASI", "")
-            urusan_rasmi = r.get("urusan rasmi", "") or r.get("Urusan Rasmi", "") or r.get("urusan_rasmi", "") or r.get("URUSAN_RASMI", "")
-            status_keahlian = r.get("status keahlian", "") or r.get("Status Keahlian", "") or r.get("status_keahlian", "") or r.get("STATUS_KEAHLIAN", "")
-            start_time = r.get("start_time", "") or r.get("Start Time", "") or r.get("start time", "") or r.get("START_TIME", "")
-            end_time = r.get("end_time", "") or r.get("End Time", "") or r.get("end time", "") or r.get("END_TIME", "")
+            # DEBUG: Print the entire record to see what's available
+            print(f"DEBUG FULL RECORD: {r}")
+            
+            # Try to get all possible column name variations
+            lokasi = (r.get("lokasi") or r.get("Lokasi") or r.get("LOKASI") or 
+                     r.get("lokasi ") or r.get("Lokasi ") or "").strip()
+            
+            urusan_rasmi = (r.get("urusan rasmi") or r.get("Urusan Rasmi") or r.get("URUSAN RASMI") or
+                           r.get("urusan_rasmi") or r.get("Urusan_Rasmi") or r.get("urusan rasmi ") or "").strip()
+            
+            status_keahlian = (r.get("status keahlian") or r.get("Status Keahlian") or r.get("STATUS KEAHLIAN") or
+                              r.get("status_keahlian") or r.get("Status_Keahlian") or r.get("status keahlian ") or "").strip()
+            
+            start_time = (r.get("start_time") or r.get("Start Time") or r.get("START TIME") or
+                         r.get("start time") or r.get("Start_Time") or r.get("start_time ") or "").strip()
+            
+            end_time = (r.get("end_time") or r.get("End Time") or r.get("END TIME") or
+                       r.get("end time") or r.get("End_Time") or r.get("end_time ") or "").strip()
+
+            # DEBUG: Print what we found
+            print(f"DEBUG - Lokasi: '{lokasi}', Start: '{start_time}', End: '{end_time}'")
             
             lines.append(f"Lokasi: {lokasi}")
             lines.append(f"Urusan Rasmi: {urusan_rasmi}")
@@ -775,9 +807,12 @@ async def staff_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 lines.append("Masa: Sepanjang Hari")
             elif start_time and end_time:
                 lines.append(f"Masa: {start_time} - {end_time}")
+            elif start_time:
+                lines.append(f"Masa: {start_time} - (Tidak dinyatakan)")
+            elif end_time:
+                lines.append(f"Masa: (Tidak dinyatakan) - {end_time}")
             else:
-                # Show what we found for debugging
-                lines.append(f"Masa: {start_time if start_time else 'Tidak dinyatakan'} - {end_time if end_time else 'Tidak dinyatakan'}")
+                lines.append("Masa: Tidak dinyatakan")
             
             lines.append("---")
 
@@ -786,7 +821,7 @@ async def staff_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["checked_once"] = True
     return STAFF_OFFICER
-
+    
 # --- Misc ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
