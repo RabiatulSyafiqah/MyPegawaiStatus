@@ -150,6 +150,36 @@ def query_status(date_str: str, officer_code: str) -> List[Dict[str, str]]:
         if (r.get("date") == date_str) and (r.get("officer") == officer_code):
             results.append(r)
     return results
+
+def delete_status(date_str: str, officer_code: str, urusan_rasmi: str) -> bool:
+    """
+    Delete records from spreadsheet that match date, officer, and urusan rasmi.
+    Returns True if any records were deleted, False otherwise.
+    """
+    ws = _get_ws()
+    rows = ws.get_all_values()
+    
+    if not rows:
+        return False
+    
+    headers = rows[0]
+    indices_to_delete = []
+    
+    # Find matching rows
+    for i, row in enumerate(rows[1:], start=2):  # start=2 because of 1-based indexing and header row
+        if len(row) >= len(headers):
+            row_dict = dict(zip(headers, row))
+            if (row_dict.get("date") == date_str and 
+                row_dict.get("officer") == officer_code and 
+                row_dict.get("urusan rasmi") == urusan_rasmi):
+                indices_to_delete.append(i)
+    
+    # Delete from bottom to top to maintain correct indices
+    indices_to_delete.sort(reverse=True)
+    for index in indices_to_delete:
+        ws.delete_rows(index)
+    
+    return len(indices_to_delete) > 0
     
 # -----------------------------
 # Google Calendar helpers
@@ -302,6 +332,90 @@ def create_calendar_event_for_luar_daerah(date_str: str, officer_code: str, urus
         log_msg(f"TRACEBACK: {traceback.format_exc()}")
         return False
 
+def delete_calendar_events(date_str: str, officer_code: str, urusan_rasmi: str) -> bool:
+    """
+    Delete calendar events that match the date, officer, and urusan rasmi.
+    Returns True if events were found and deleted, False otherwise.
+    """
+    import sys
+    
+    def log_msg(msg):
+        print(f"CALENDAR_DELETE_DEBUG: {msg}")
+        sys.stdout.flush()
+        
+    log_msg(f"Starting event deletion for {officer_code} on {date_str}")
+    
+    cal_id = _get_calendar_id_for_officer(officer_code)
+    if not cal_id:
+        log_msg(f"ERROR: No calendar ID for {officer_code}")
+        return False
+        
+    log_msg(f"Using calendar ID: {cal_id}")
+    
+    try:
+        service = _get_calendar_service()
+        log_msg("Service created successfully")
+
+        # For LUAR DAERAH events (all-day)
+        luar_daerah_summary = f"LUAR DAERAH — {_code_to_label(officer_code)}"
+        # For KENINGAU events (timed)
+        keningau_summary = f"KENINGAU — {_code_to_label(officer_code)}"
+        
+        # Calculate time range for the day
+        event_date = datetime.strptime(date_str, DATE_FMT).date()
+        time_min = datetime(event_date.year, event_date.month, event_date.day, 0, 0, 0)
+        time_max = datetime(event_date.year, event_date.month, event_date.day, 23, 59, 59)
+        
+        if BOT_TIMEZONE:
+            try:
+                tz = ZoneInfo(BOT_TIMEZONE)
+                time_min = time_min.replace(tzinfo=tz)
+                time_max = time_max.replace(tzinfo=tz)
+            except Exception as e:
+                log_msg(f"Timezone error: {e}")
+
+        log_msg(f"Searching events from {time_min} to {time_max}")
+        
+        # Get events for the day
+        events_result = service.events().list(
+            calendarId=cal_id,
+            timeMin=time_min.isoformat(),
+            timeMax=time_max.isoformat(),
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        events = events_result.get('items', [])
+        log_msg(f"Found {len(events)} events to check")
+
+        deleted_count = 0
+        
+        for event in events:
+            event_description = event.get('description', '')
+            event_summary = event.get('summary', '')
+            
+            # Check if this event matches our criteria
+            if (urusan_rasmi in event_description and 
+                (event_summary == luar_daerah_summary or event_summary == keningau_summary)):
+                
+                log_msg(f"Deleting event: {event_summary}")
+                service.events().delete(calendarId=cal_id, eventId=event['id']).execute()
+                deleted_count += 1
+                log_msg(f"Successfully deleted event {event['id']}")
+        
+        log_msg(f"Deleted {deleted_count} events")
+        return deleted_count > 0
+        
+    except HttpError as e:
+        log_msg(f"Google Calendar API HTTP error: {e}")
+        log_msg(f"HTTP error details: status={e.resp.status}, reason={e.resp.reason}")
+        return False
+    except Exception as e:
+        log_msg(f"EXCEPTION: {type(e).__name__}: {str(e)}")
+        import traceback
+        log_msg(f"TRACEBACK: {traceback.format_exc()}")
+        return False
+
 # -----------------------------
 # Utilities
 # -----------------------------
@@ -393,6 +507,16 @@ def role_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True,
     )
 
+def admin_main_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("Kemaskini Jadual"), KeyboardButton("Padam Jadual")],
+            [KeyboardButton("Selesai")],
+        ],
+        one_time_keyboard=True,
+        resize_keyboard=True,
+    )
+
 # Flask integration
 _EVENT_LOOP = None  # type: Optional[asyncio.AbstractEventLoop]
 
@@ -435,6 +559,7 @@ def create_flask_app(app_telegram: Application) -> Flask:
     CHOOSE_ROLE,
     ADMIN_USERNAME,
     ADMIN_PASSWORD,
+    ADMIN_MAIN_MENU,
     ADMIN_DATE,
     ADMIN_OFFICER,
     ADMIN_LOCATION,
@@ -444,8 +569,12 @@ def create_flask_app(app_telegram: Application) -> Flask:
     ADMIN_OFFICIAL_BUSINESS_END,
     STAFF_DATE,
     STAFF_OFFICER,
-    ADMIN_CONTINUE_DECISION,  
-) = range(13)
+    ADMIN_CONTINUE_DECISION,
+    ADMIN_DELETE_DATE,
+    ADMIN_DELETE_OFFICER,
+    ADMIN_DELETE_SELECT_EVENT,
+    ADMIN_DELETE_CONFIRM,
+) = range(18)
 
 # -----------------------------
 # Handlers
@@ -494,8 +623,27 @@ async def admin_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     context.user_data["is_admin"] = True
-    await update.message.reply_text("Sila masukkan tarikh pilihan (DD/MM/YYYY):")
-    return ADMIN_DATE
+    await update.message.reply_text(
+        "Log masuk berjaya! Sila pilih tindakan:",
+        reply_markup=admin_main_keyboard()
+    )
+    return ADMIN_MAIN_MENU
+
+async def admin_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    choice = update.message.text.strip()
+    
+    if choice == "Kemaskini Jadual":
+        await update.message.reply_text("Sila masukkan tarikh pilihan (DD/MM/YYYY):", reply_markup=ReplyKeyboardRemove())
+        return ADMIN_DATE
+    elif choice == "Padam Jadual":
+        await update.message.reply_text("Sila masukkan tarikh untuk dipadam (DD/MM/YYYY):", reply_markup=ReplyKeyboardRemove())
+        return ADMIN_DELETE_DATE
+    elif choice == "Selesai":
+        await update.message.reply_text("Sesi Admin Ditamatkan. Terima Kasih.", reply_markup=ReplyKeyboardRemove())
+        return ConversationHandler.END
+    else:
+        await update.message.reply_text("Pilihan tidak dikenali. Sila pilih daripada papan kekunci.", reply_markup=admin_main_keyboard())
+        return ADMIN_MAIN_MENU
 
 async def admin_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = update.message.text
@@ -670,11 +818,171 @@ async def admin_continue_decision(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("Sila masukkan tarikh pilihan (DD/MM/YYYY):", reply_markup=ReplyKeyboardRemove())
         return ADMIN_DATE
     elif choice == "TIDAK":
-        await update.message.reply_text("Sesi Kemaskini Ditamatkan. Terima Kasih.", reply_markup=ReplyKeyboardRemove())
-        return ConversationHandler.END
+        await update.message.reply_text(
+            "Sila pilih tindakan seterusnya:",
+            reply_markup=admin_main_keyboard()
+        )
+        return ADMIN_MAIN_MENU
     else:
         await update.message.reply_text("Sila pilih YA atau TIDAK.", reply_markup=yes_no_keyboard())
         return ADMIN_CONTINUE_DECISION
+
+# --- Delete flow ---
+async def admin_delete_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw = update.message.text
+    d = parse_date_ddmmyyyy(raw)
+    if not d:
+        await update.message.reply_text("Tarikh tidak sah. Sila gunakan format DD/MM/YYYY.")
+        return ADMIN_DELETE_DATE
+
+    context.user_data["delete_date"] = d
+    await update.message.reply_text("Sila pilih pegawai untuk dipadam:", reply_markup=officer_keyboard())
+    return ADMIN_DELETE_OFFICER
+
+async def admin_delete_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    label = update.message.text.strip()
+    code = officer_label_to_code(label)
+    if not code:
+        await update.message.reply_text("Pilihan pegawai tidak sah. Sila cuba sekali lagi.")
+        return ADMIN_DELETE_OFFICER
+    
+    context.user_data["delete_officer"] = code
+    
+    # Get events for this date and officer
+    date_str = context.user_data["delete_date"]
+    records = query_status(date_str, code)
+    
+    if not records:
+        await update.message.reply_text(
+            f"Tiada rekod untuk {_code_to_label(code)} pada {date_str}.",
+            reply_markup=admin_main_keyboard()
+        )
+        return ADMIN_MAIN_MENU
+    
+    # Store records for selection
+    context.user_data["delete_records"] = records
+    
+    # Create selection keyboard
+    keyboard = []
+    for i, record in enumerate(records):
+        urusan_rasmi = record.get("urusan rasmi", "Unknown")
+        lokasi = record.get("lokasi", "")
+        start_time = record.get("masa mula", "")
+        end_time = record.get("masa tamat", "")
+        
+        if lokasi == "LUAR DAERAH":
+            display_text = f"LUAR DAERAH: {urusan_rasmi}"
+        elif start_time and end_time:
+            display_text = f"{start_time}-{end_time}: {urusan_rasmi}"
+        else:
+            display_text = urusan_rasmi
+            
+        keyboard.append([KeyboardButton(display_text)])
+    
+    keyboard.append([KeyboardButton("Kembali ke Menu Utama")])
+    
+    await update.message.reply_text(
+        f"Pilih urusan rasmi untuk dipadam bagi {_code_to_label(code)} pada {date_str}:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    )
+    return ADMIN_DELETE_SELECT_EVENT
+
+async def admin_delete_select_event(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    choice = update.message.text.strip()
+    
+    if choice == "Kembali ke Menu Utama":
+        await update.message.reply_text(
+            "Sila pilih tindakan:",
+            reply_markup=admin_main_keyboard()
+        )
+        return ADMIN_MAIN_MENU
+    
+    records = context.user_data.get("delete_records", [])
+    selected_record = None
+    
+    # Find the matching record
+    for record in records:
+        urusan_rasmi = record.get("urusan rasmi", "Unknown")
+        lokasi = record.get("lokasi", "")
+        start_time = record.get("masa mula", "")
+        end_time = record.get("masa tamat", "")
+        
+        if lokasi == "LUAR DAERAH":
+            display_text = f"LUAR DAERAH: {urusan_rasmi}"
+        elif start_time and end_time:
+            display_text = f"{start_time}-{end_time}: {urusan_rasmi}"
+        else:
+            display_text = urusan_rasmi
+            
+        if display_text == choice:
+            selected_record = record
+            break
+    
+    if not selected_record:
+        await update.message.reply_text("Pilihan tidak sah. Sila cuba sekali lagi.")
+        return ADMIN_DELETE_SELECT_EVENT
+    
+    context.user_data["delete_selected"] = selected_record
+    
+    # Show confirmation
+    urusan_rasmi = selected_record.get("urusan rasmi", "")
+    lokasi = selected_record.get("lokasi", "")
+    status_keahlian = selected_record.get("status keahlian", "")
+    
+    confirmation_text = (
+        f"Adakah anda pasti ingin memadam rekod ini?\n\n"
+        f"Pegawai: {_code_to_label(context.user_data['delete_officer'])}\n"
+        f"Tarikh: {context.user_data['delete_date']}\n"
+        f"Lokasi: {lokasi}\n"
+        f"Urusan Rasmi: {urusan_rasmi}\n"
+        f"Status Keahlian: {status_keahlian}"
+    )
+    
+    await update.message.reply_text(
+        confirmation_text,
+        reply_markup=yes_no_keyboard()
+    )
+    return ADMIN_DELETE_CONFIRM
+
+async def admin_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    choice = update.message.text.strip().upper()
+    
+    if choice == "YA":
+        selected_record = context.user_data["delete_selected"]
+        date_str = context.user_data["delete_date"]
+        officer_code = context.user_data["delete_officer"]
+        urusan_rasmi = selected_record.get("urusan rasmi", "")
+        
+        # Delete from database
+        db_success = delete_status(date_str, officer_code, urusan_rasmi)
+        
+        # Delete from calendar
+        cal_success = delete_calendar_events(date_str, officer_code, urusan_rasmi)
+        
+        if db_success:
+            message = "Rekod berjaya dipadam dari pangkalan data."
+            if cal_success:
+                message += " Acara juga berjaya dipadam dari kalendar."
+            else:
+                message += " (Gagal memadam dari kalendar — semak konfigurasi.)"
+        else:
+            message = "Gagal memadam rekod. Sila cuba lagi."
+        
+        await update.message.reply_text(
+            message,
+            reply_markup=admin_main_keyboard()
+        )
+        return ADMIN_MAIN_MENU
+        
+    elif choice == "TIDAK":
+        await update.message.reply_text(
+            "Pemadaman dibatalkan.",
+            reply_markup=admin_main_keyboard()
+        )
+        return ADMIN_MAIN_MENU
+    else:
+        await update.message.reply_text("Sila pilih YA atau TIDAK.", reply_markup=yes_no_keyboard())
+        return ADMIN_DELETE_CONFIRM
 
 # --- Staff flow ---
 async def staff_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -843,6 +1151,7 @@ def main():
                 # Admin states
                 ADMIN_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_username)],
                 ADMIN_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_password)],
+                ADMIN_MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_main_menu)],
                 ADMIN_DATE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_date)],
                 ADMIN_OFFICER:  [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_officer)],
                 ADMIN_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_location)],
@@ -851,6 +1160,12 @@ def main():
                 ADMIN_OFFICIAL_BUSINESS_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_official_business_start)],
                 ADMIN_OFFICIAL_BUSINESS_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_official_business_end)],
                 ADMIN_CONTINUE_DECISION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_continue_decision)],
+                
+                # Delete states
+                ADMIN_DELETE_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_delete_date)],
+                ADMIN_DELETE_OFFICER: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_delete_officer)],
+                ADMIN_DELETE_SELECT_EVENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_delete_select_event)],
+                ADMIN_DELETE_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_delete_confirm)],
 
                 # Staff states
                 STAFF_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_date)],
@@ -900,6 +1215,7 @@ def main():
                 # Admin states
                 ADMIN_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_username)],
                 ADMIN_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_password)],
+                ADMIN_MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_main_menu)],
                 ADMIN_DATE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_date)],
                 ADMIN_OFFICER:  [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_officer)],
                 ADMIN_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_location)],
@@ -908,6 +1224,12 @@ def main():
                 ADMIN_OFFICIAL_BUSINESS_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_official_business_start)],
                 ADMIN_OFFICIAL_BUSINESS_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_official_business_end)],
                 ADMIN_CONTINUE_DECISION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_continue_decision)],
+                
+                # Delete states
+                ADMIN_DELETE_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_delete_date)],
+                ADMIN_DELETE_OFFICER: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_delete_officer)],
+                ADMIN_DELETE_SELECT_EVENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_delete_select_event)],
+                ADMIN_DELETE_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_delete_confirm)],
 
                 # Staff states
                 STAFF_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_date)],
