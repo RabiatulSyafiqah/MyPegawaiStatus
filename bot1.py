@@ -343,7 +343,7 @@ def delete_calendar_events(date_str: str, officer_code: str, urusan_rasmi: str) 
         print(f"CALENDAR_DELETE_DEBUG: {msg}")
         sys.stdout.flush()
         
-    log_msg(f"Starting event deletion for {officer_code} on {date_str}")
+    log_msg(f"Starting event deletion for {officer_code} on {date_str}, urusan: {urusan_rasmi}")
     
     cal_id = _get_calendar_id_for_officer(officer_code)
     if not cal_id:
@@ -356,27 +356,27 @@ def delete_calendar_events(date_str: str, officer_code: str, urusan_rasmi: str) 
         service = _get_calendar_service()
         log_msg("Service created successfully")
 
-        # For LUAR DAERAH events (all-day)
-        luar_daerah_summary = f"LUAR DAERAH — {_code_to_label(officer_code)}"
-        # For KENINGAU events (timed)
-        keningau_summary = f"KENINGAU — {_code_to_label(officer_code)}"
-        
-        # Calculate time range for the day
+        # Parse the date for the entire day range
         event_date = datetime.strptime(date_str, DATE_FMT).date()
+        
+        # Start of day in the bot's timezone
         time_min = datetime(event_date.year, event_date.month, event_date.day, 0, 0, 0)
+        # End of day in the bot's timezone  
         time_max = datetime(event_date.year, event_date.month, event_date.day, 23, 59, 59)
         
+        # Apply timezone if available
         if BOT_TIMEZONE:
             try:
                 tz = ZoneInfo(BOT_TIMEZONE)
                 time_min = time_min.replace(tzinfo=tz)
                 time_max = time_max.replace(tzinfo=tz)
+                log_msg(f"Applied timezone {BOT_TIMEZONE} to time range")
             except Exception as e:
                 log_msg(f"Timezone error: {e}")
 
         log_msg(f"Searching events from {time_min} to {time_max}")
         
-        # Get events for the day
+        # Get events for the entire day
         events_result = service.events().list(
             calendarId=cal_id,
             timeMin=time_min.isoformat(),
@@ -386,22 +386,40 @@ def delete_calendar_events(date_str: str, officer_code: str, urusan_rasmi: str) 
         ).execute()
         
         events = events_result.get('items', [])
-        log_msg(f"Found {len(events)} events to check")
+        log_msg(f"Found {len(events)} total events for the day")
 
         deleted_count = 0
         
+        # Search for matching events
         for event in events:
             event_description = event.get('description', '')
             event_summary = event.get('summary', '')
+            event_id = event.get('id')
+            
+            log_msg(f"Checking event: {event_summary}")
+            log_msg(f"Event description: {event_description}")
+            log_msg(f"Looking for urusan: '{urusan_rasmi}' in description")
             
             # Check if this event matches our criteria
-            if (urusan_rasmi in event_description and 
-                (event_summary == luar_daerah_summary or event_summary == keningau_summary)):
-                
-                log_msg(f"Deleting event: {event_summary}")
-                service.events().delete(calendarId=cal_id, eventId=event['id']).execute()
-                deleted_count += 1
-                log_msg(f"Successfully deleted event {event['id']}")
+            # Look for the urusan rasmi in the description
+            if urusan_rasmi in event_description:
+                log_msg(f"✓ MATCH FOUND: Event ID {event_id}")
+                try:
+                    log_msg(f"Deleting event: {event_summary} (ID: {event_id})")
+                    service.events().delete(calendarId=cal_id, eventId=event_id).execute()
+                    deleted_count += 1
+                    log_msg(f"✓ Successfully deleted event {event_id}")
+                except HttpError as e:
+                    log_msg(f"✗ Failed to delete event {event_id}: {e}")
+                    # Check if it's a 404 error (event not found)
+                    if e.resp.status == 404:
+                        log_msg(f"Event {event_id} not found in calendar - might have been already deleted")
+                    else:
+                        log_msg(f"HTTP error details: status={e.resp.status}, reason={e.resp.reason}")
+                except Exception as e:
+                    log_msg(f"✗ Error deleting event {event_id}: {e}")
+            else:
+                log_msg(f"✗ NO MATCH: '{urusan_rasmi}' not found in description")
         
         log_msg(f"Deleted {deleted_count} events")
         return deleted_count > 0
