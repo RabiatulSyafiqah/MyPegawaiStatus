@@ -529,7 +529,7 @@ def admin_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("Kemaskini Jadual"), KeyboardButton("Padam Jadual")],
-            [KeyboardButton("Selesai")],
+            [KeyboardButton("Tamat Sesi")],
         ],
         one_time_keyboard=True,
         resize_keyboard=True,
@@ -599,7 +599,7 @@ def create_flask_app(app_telegram: Application) -> Flask:
 # -----------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "Selamat datang ke *MyPegawaiStatus!* 🏛️\n\n"
+        "Selamat datang ke MyPegawaiStatus! \n\n"
         "Sila pilih kategori kakitangan anda:\n"
         "1. Kakitangan Admin\n"
         "2. Kakitangan Biasa"\
@@ -630,7 +630,7 @@ async def choose_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Admin flow ---
 async def admin_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["username"] = update.message.text.strip()
-    await update.message.reply_text("Sila masukkan kata laluan:")
+    await update.message.reply_text("Nyatakan kata laluan pengguna:")
     return ADMIN_PASSWORD
 
 async def admin_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -642,7 +642,7 @@ async def admin_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["is_admin"] = True
     await update.message.reply_text(
-        "Log masuk berjaya! Sila pilih tindakan:",
+        "Log masuk berjaya!",
         reply_markup=admin_main_keyboard()
     )
     return ADMIN_MAIN_MENU
@@ -654,9 +654,9 @@ async def admin_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Sila masukkan tarikh pilihan (DD/MM/YYYY):", reply_markup=ReplyKeyboardRemove())
         return ADMIN_DATE
     elif choice == "Padam Jadual":
-        await update.message.reply_text("Sila masukkan tarikh untuk dipadam (DD/MM/YYYY):", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("Sila masukkan tarikh untuk dihapuskan (DD/MM/YYYY):", reply_markup=ReplyKeyboardRemove())
         return ADMIN_DELETE_DATE
-    elif choice == "Selesai":
+    elif choice == "Tamat Sesi":
         await update.message.reply_text("Sesi Admin Ditamatkan. Terima Kasih.", reply_markup=ReplyKeyboardRemove())
         return ConversationHandler.END
     else:
@@ -854,7 +854,7 @@ async def admin_delete_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ADMIN_DELETE_DATE
 
     context.user_data["delete_date"] = d
-    await update.message.reply_text("Sila pilih pegawai untuk dipadam:", reply_markup=officer_keyboard())
+    await update.message.reply_text("Sila pilih pegawai yang ingin dikemaskini :", reply_markup=officer_keyboard())
     return ADMIN_DELETE_OFFICER
 
 async def admin_delete_officer(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -900,7 +900,7 @@ async def admin_delete_officer(update: Update, context: ContextTypes.DEFAULT_TYP
     keyboard.append([KeyboardButton("Kembali ke Menu Utama")])
     
     await update.message.reply_text(
-        f"Pilih urusan rasmi untuk dipadam bagi {_code_to_label(code)} pada {date_str}:",
+        f"Tetapkan jadual yang ingin dikemaskini bagi {_code_to_label(code)} pada {date_str}:",
         reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
     return ADMIN_DELETE_SELECT_EVENT
@@ -978,9 +978,9 @@ async def admin_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
         cal_success = delete_calendar_events(date_str, officer_code, urusan_rasmi)
         
         if db_success:
-            message = "Rekod berjaya dipadam dari pangkalan data."
+            message = "Rekod pegawai"
             if cal_success:
-                message += " Acara juga berjaya dipadam dari kalendar."
+                message += " berjaya dikemaskini."
             else:
                 message += " (Gagal memadam dari kalendar — semak konfigurasi.)"
         else:
