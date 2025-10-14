@@ -1,6 +1,6 @@
 CALENDAR_IDS = {
    
-    "DO": "lesyeuxdenugget@gmail.com",
-    "ADO_PENTADBIRAN": "rabiatulsyafiqahhh@gmail.com",
-    "ADO_PEMBANGUNAN": "rabiatulsyafiqahhh@gmail.com"
+    "DO": "do.pdkeningau@gmail.com",
+    "ADO_PENTADBIRAN": "ado.pentadbiran.pdkgu@gmail.com",
+    "ADO_PEMBANGUNAN": "ado.pembangunan.pdkgu@gmail.com"
 }
